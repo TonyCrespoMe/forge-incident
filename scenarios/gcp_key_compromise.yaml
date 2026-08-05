@@ -1,0 +1,350 @@
+# ForgeIncident scenario file
+# =============================================================================
+# See scenarios/phishing_to_exfil.yaml for a fully commented walkthrough of
+# the file format. This scenario is a good second reference because it
+# exercises a different pair of emitters (gcp_audit + linux) and makes a
+# specific pedagogical point: cloud audit logs record the CREDENTIAL used
+# (a service account's principalEmail), never the human behind it. Notice
+# that no timeline event below sets `actor: attacker` — a real GCP audit
+# log has no way of knowing that. The only thread connecting the cloud
+# compromise back to a human is the reused source IP address, which also
+# shows up in the developer laptop's Linux auth log.
+# =============================================================================
+
+scenario_id: gcp-key-compromise-01
+title: "Leaked Service Account Key to Cloud Data Exfiltration"
+description: >
+  A developer at Initrode LLC creates a GCP service-account key for a CI
+  pipeline and saves it to a local repository folder. The key is later
+  leaked (e.g. via an accidental public commit) and an external actor
+  uses it directly against the GCP API — no phishing or malware needed.
+  The attacker enumerates storage buckets, escalates the service
+  account's own IAM privileges, mints a second "backdoor" key for
+  persistence, and downloads a sensitive financial backup archive. The
+  same external IP is later seen brute-forcing SSH on the developer's
+  laptop. Students correlate GCP audit logs with a Linux auth log to
+  attribute the cloud compromise to a leaked credential rather than a
+  network intrusion.
+
+# Shown to students verbatim in their package README — must NOT reveal the
+# attack chain above. See scenarios/phishing_to_exfil.yaml for more on why
+# `description` and `student_briefing` are kept separate.
+student_briefing: >
+  Initrode LLC's cloud security team received an automated alert
+  correlating an unusual IAM policy change with a new service-account key
+  in the "initrode-prod-01" GCP project, well outside the "ci-deploy"
+  service account's normal CI/CD usage pattern. Around the same time,
+  David Lee (Platform Engineering, dlee@initrode.example) reported a
+  burst of failed SSH login attempts against his laptop, DLEE-LAPTOP. You
+  have been provided a GCP Cloud Audit Log export for the project and a
+  Linux auth/syslog export from David's laptop, covering April 15-24,
+  2026 (UTC).
+
+  Your task: determine how the ci-deploy service account's credentials
+  came to be used by someone outside the CI pipeline, what actions were
+  taken with them, whether the SSH activity on David's laptop is related,
+  and what data (if any) was accessed or exfiltrated.
+difficulty: advanced
+version: "1.0"
+seed: 20260415
+
+organization:
+  name: Initrode LLC
+  domain: initrode.example
+  industry: Software
+  timezone: UTC
+  gcp_project_id: initrode-prod-01
+
+mitre_tactics:
+  - Discovery
+  - Credential Access
+  - Privilege Escalation
+  - Persistence
+  - Exfiltration
+
+learning_objectives:
+  - Recognize that cloud audit logs identify the credential, not the human, behind an action
+  - Distinguish legitimate administrative API calls from anomalous ones using caller IP and timing
+  - Identify privilege escalation via IAM policy binding changes
+  - Recognize service-account key creation as a cloud persistence technique
+  - Correlate an external IP across a cloud audit trail and an on-premises Linux auth log
+  - Quantify exfiltrated data from cloud storage access logs
+
+tags: [cloud, gcp, credential-leak, iam, exfiltration, insider-risk]
+
+start_time: "2026-04-15T09:00:00Z"
+
+actors:
+  developer:
+    username: dlee
+    email: dlee@initrode.example
+    display_name: David Lee
+    department: Engineering
+    role_title: Platform Engineer
+    employee_id: IX-2201
+  service_account:
+    username: svc-ci-deploy
+    email: ci-deploy@initrode-prod-01.iam.gserviceaccount.com
+    display_name: "CI Deploy Service Account"
+    is_privileged: true
+  attacker:
+    # Included for instructor context only — intentionally never referenced
+    # as an `actor:` on any event below, since neither GCP audit logs nor
+    # the Linux auth log actually identify this person.
+    username: unknown
+    email: unknown@unknown.external
+    display_name: Unattributed External Actor
+    is_compromised: true
+
+hosts:
+  dev-laptop:
+    hostname: DLEE-LAPTOP
+    ip_address: 10.50.12.33
+    host_type: laptop
+    os: linux
+    os_version: "Ubuntu 22.04 LTS"
+    mac_address: "08:00:27:AA:BB:CC"
+
+timeline:
+  - id: key-created
+    at: "+0m"
+    event_type: cloud_resource_created
+    log_sources: [gcp_audit]
+    severity: info
+    actor: developer
+    description: >
+      David Lee legitimately creates a new JSON key for the ci-deploy
+      service account to authenticate a CI/CD pipeline.
+    cloud:
+      method_name: google.iam.admin.v1.CreateServiceAccountKey
+      service_name: iam.googleapis.com
+      resource_name: "projects/initrode-prod-01/serviceAccounts/ci-deploy@initrode-prod-01.iam.gserviceaccount.com/keys/1a2b3c4d5e6f"
+      caller_ip: 10.50.12.33
+      user_agent: "google-cloud-sdk gcloud/470.0.0"
+      status_code: "OK"
+      project_id: initrode-prod-01
+
+  - id: key-saved
+    at: "+2m"
+    event_type: file_created
+    log_sources: [linux]
+    severity: info
+    actor: developer
+    host: dev-laptop
+    description: >
+      The downloaded key is saved into a local repository working
+      directory that is later committed and accidentally pushed to a
+      public GitHub repository — the actual leak vector, which occurs
+      outside any system ForgeIncident models and is documented here only
+      for instructor narrative.
+    file:
+      path: /home/dlee/repos/initrode-utils/secrets/ci-deploy-key.json
+      filename: ci-deploy-key.json
+      sha256: "b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3"
+      size_bytes: 2371
+
+  - id: bucket-list
+    at: "+9d00h10m"
+    event_type: cloud_api_call
+    log_sources: [gcp_audit]
+    severity: medium
+    actor: service_account
+    description: >
+      The ci-deploy service account credentials are used to enumerate
+      every storage bucket in the project from an external IP the
+      account has never been used from before — the CI pipeline normally
+      only ever calls this API from Initrode's build servers.
+    mitre:
+      technique_id: T1526
+      technique_name: "Cloud Service Discovery"
+      tactic: Discovery
+    cloud:
+      method_name: storage.buckets.list
+      service_name: storage.googleapis.com
+      resource_name: "projects/initrode-prod-01"
+      caller_ip: 185.220.101.47
+      user_agent: "google-api-python-client/2.120.0"
+      status_code: "OK"
+      project_id: initrode-prod-01
+
+  - id: object-list
+    at: "+9d00h12m"
+    event_type: cloud_api_call
+    log_sources: [gcp_audit]
+    severity: medium
+    actor: service_account
+    description: >
+      Objects are enumerated inside the "initrode-finance-backups"
+      bucket, a bucket the CI pipeline has no legitimate reason to touch.
+    mitre:
+      technique_id: T1530
+      technique_name: "Data from Cloud Storage Object"
+      tactic: Collection
+    cloud:
+      method_name: storage.objects.list
+      service_name: storage.googleapis.com
+      resource_name: "projects/_/buckets/initrode-finance-backups"
+      caller_ip: 185.220.101.47
+      user_agent: "google-api-python-client/2.120.0"
+      status_code: "OK"
+      project_id: initrode-prod-01
+
+  - id: iam-change
+    at: "+9d00h20m"
+    event_type: cloud_permission_change
+    log_sources: [gcp_audit]
+    severity: high
+    actor: service_account
+    description: >
+      The service account grants itself the project-level Owner role,
+      far beyond the "Storage Object Viewer" role it was originally
+      scoped to for CI deployments.
+    mitre:
+      technique_id: T1098.001
+      technique_name: "Account Manipulation: Additional Cloud Credentials"
+      tactic: Persistence
+    cloud:
+      method_name: SetIamPolicy
+      service_name: cloudresourcemanager.googleapis.com
+      resource_name: "projects/initrode-prod-01"
+      caller_ip: 185.220.101.47
+      user_agent: "google-api-python-client/2.120.0"
+      status_code: "OK"
+      project_id: initrode-prod-01
+
+  - id: backdoor-key
+    at: "+9d00h22m"
+    event_type: cloud_resource_created
+    log_sources: [gcp_audit]
+    severity: high
+    actor: service_account
+    description: >
+      With its newly elevated privileges, the service account mints a
+      second key for itself — a backdoor credential that would survive
+      rotation of the originally leaked key.
+    mitre:
+      technique_id: T1098.001
+      technique_name: "Account Manipulation: Additional Cloud Credentials"
+      tactic: Persistence
+    cloud:
+      method_name: google.iam.admin.v1.CreateServiceAccountKey
+      service_name: iam.googleapis.com
+      resource_name: "projects/initrode-prod-01/serviceAccounts/ci-deploy@initrode-prod-01.iam.gserviceaccount.com/keys/9f8e7d6c5b4a"
+      caller_ip: 185.220.101.47
+      user_agent: "google-api-python-client/2.120.0"
+      status_code: "OK"
+      project_id: initrode-prod-01
+
+  - id: exfil
+    at: "+9d00h40m"
+    event_type: data_exfiltration
+    log_sources: [gcp_audit]
+    severity: critical
+    actor: service_account
+    description: >
+      The financial backup archive is downloaded directly from Cloud
+      Storage to the attacker's external host.
+    mitre:
+      technique_id: T1567.002
+      technique_name: "Exfiltration to Cloud Storage"
+      tactic: Exfiltration
+    cloud:
+      method_name: storage.objects.get
+      service_name: storage.googleapis.com
+      resource_name: "projects/_/buckets/initrode-finance-backups/objects/finance_backup_2026Q1.tar.gz"
+      caller_ip: 185.220.101.47
+      user_agent: "google-api-python-client/2.120.0"
+      status_code: "OK"
+      project_id: initrode-prod-01
+    file:
+      path: gs://initrode-finance-backups/finance_backup_2026Q1.tar.gz
+      filename: finance_backup_2026Q1.tar.gz
+      sha256: "d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7"
+      size_bytes: 412876800
+
+  - id: ssh-bruteforce
+    at: "+9d03h00m"
+    event_type: account_login_failure
+    log_sources: [linux]
+    severity: medium
+    actor: developer
+    host: dev-laptop
+    description: >
+      47 failed SSH login attempts against David Lee's laptop from
+      185.220.101.47 — the same IP used against the GCP API earlier the
+      same day — suggesting the attacker also attempted to pivot to the
+      source of the leaked key.
+    mitre:
+      technique_id: T1110
+      technique_name: "Brute Force"
+      tactic: Credential Access
+    extra:
+      attempt_count: 47
+      source_ip: 185.220.101.47
+
+  - id: alert
+    at: "+9d04h00m"
+    event_type: alert_triggered
+    log_sources: [gcp_audit]
+    severity: critical
+    description: >
+      Cloud SIEM raises a critical alert correlating the anomalous
+      SetIamPolicy call with a service-account key created minutes
+      afterward from an unfamiliar external IP.
+    mitre:
+      technique_id: T1098.001
+      technique_name: "Account Manipulation: Additional Cloud Credentials"
+      tactic: Persistence
+
+answer_key:
+  - id: q1
+    question: "How did the attacker initially obtain access to the GCP environment?"
+    answer: >
+      Not through any GCP vulnerability. A service-account JSON key was
+      legitimately created by a developer for CI/CD, saved to a local
+      repository folder, and later leaked (e.g. via an accidental public
+      commit) — giving the attacker valid, working credentials.
+    related_event_ids: [key-created, key-saved]
+    points: 2
+
+  - id: q2
+    question: "Which GCP API calls in the audit log indicate reconnaissance rather than normal CI activity?"
+    answer: >
+      storage.buckets.list and storage.objects.list, both called from
+      185.220.101.47 — an IP the ci-deploy service account had never used
+      before, and both listing resources far outside the CI pipeline's
+      normal scope.
+    related_event_ids: [bucket-list, object-list]
+    points: 2
+
+  - id: q3
+    question: "How did the attacker establish persistence in the cloud environment?"
+    answer: >
+      By calling SetIamPolicy to grant the compromised service account
+      the project-level Owner role, then immediately minting a second
+      service-account key — a backdoor credential that survives rotation
+      of the original leaked key.
+    related_event_ids: [iam-change, backdoor-key]
+    points: 3
+
+  - id: q4
+    question: "What single indicator links the cloud compromise to the developer's laptop, and why does it matter that no event's `actor` field is the attacker?"
+    answer: >
+      The source IP 185.220.101.47 appears both as caller_ip in the GCP
+      audit log entries and as the source of a failed-SSH brute-force
+      burst in the laptop's Linux auth log. No audit or auth log ever
+      records an "attacker" identity directly — cloud and OS logs only
+      record the credential/account used, which is why identifying the
+      human behind an intrusion always requires this kind of external
+      correlation, not just reading a single log's actor field.
+    related_event_ids: [bucket-list, ssh-bruteforce]
+    points: 3
+
+  - id: q5
+    question: "What data was exfiltrated, and how large was it?"
+    answer: >
+      finance_backup_2026Q1.tar.gz from the initrode-finance-backups
+      bucket, approximately 394 MB (412,876,800 bytes) per the GCP audit
+      log entry for the storage.objects.get call.
+    related_event_ids: [exfil]
+    points: 1
