@@ -12,8 +12,11 @@ deterministic and reproducible from its seed as a plain `--from-yaml` run.
 
 xAI's API is intentionally OpenAI-compatible, so this backend just points
 the `openai` SDK at xAI's base URL rather than pulling in a separate
-client library. If `GROK_MODEL`'s default below is no longer current,
-check https://docs.x.ai/docs/models and set GROK_MODEL in .env.
+client library. The default below (grok-4.3, current flagship-tier as of
+Aug 2026) is xAI's cheaper flagship rather than the newest grok-4.5, since
+this project favors keeping default per-run cost low. If `GROK_MODEL`'s
+default is no longer current, check https://docs.x.ai/docs/models and set
+GROK_MODEL in .env.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ from forge_incident.models import Difficulty
 
 __all__ = ["GrokLLMBackend"]
 
-_DEFAULT_MODEL = "grok-2-latest"
+_DEFAULT_MODEL = "grok-4.3"
 _XAI_BASE_URL = "https://api.x.ai/v1"
 
 _SYSTEM_PROMPT = """You are the scenario-planning module of ForgeIncident, an \

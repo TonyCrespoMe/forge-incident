@@ -54,6 +54,18 @@ _DIFFICULTY_GUIDANCE: dict[Difficulty, str] = {
     ),
 }
 
+# Rough output-token budgets per difficulty, sized from the bundled example
+# scenarios (~9-10 events ≈ 3.4k tokens of YAML at ~370 tokens/event including
+# description+mitre+payload, plus ~600 tokens of header/actor/host/answer-key
+# overhead). Generous headroom is intentional: a response cut off mid-YAML by
+# hitting the token cap fails validation and burns a retry (i.e. costs MORE,
+# not less, than budgeting enough tokens up front).
+_MAX_OUTPUT_TOKENS: dict[Difficulty, int] = {
+    Difficulty.BEGINNER: 4096,
+    Difficulty.INTERMEDIATE: 6144,
+    Difficulty.ADVANCED: 9216,
+}
+
 _KNOWN_EVENT_TYPES = (
     "account_login_success, account_login_failure, account_lockout, mfa_challenge, "
     "mfa_bypass, password_reset, user_created, group_membership_changed, "
@@ -377,7 +389,11 @@ def generate_new_scenario(
             example_yaml=example_yaml,
             previous_error=previous_error,
         )
-        raw_text = backend.generate_scenario_text(system_prompt=system_prompt, user_prompt=user_prompt)
+        raw_text = backend.generate_scenario_text(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=_MAX_OUTPUT_TOKENS[difficulty],
+        )
         yaml_text = _extract_yaml(raw_text)
         last_yaml_text = yaml_text
 

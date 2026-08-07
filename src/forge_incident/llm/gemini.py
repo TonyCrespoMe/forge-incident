@@ -11,8 +11,10 @@ IPs, hashes, or log content. A Gemini-planned package is exactly as
 deterministic and reproducible from its seed as a plain `--from-yaml` run.
 
 Uses the `google-generativeai` SDK. Google's Gemini model lineup moves
-fast; if `GEMINI_MODEL`'s default below 404s for you, check
-https://ai.google.dev/gemini-api/docs/models and set GEMINI_MODEL in .env.
+FAST — the default below (gemini-2.5-flash, current as of Aug 2026) is
+already slated to shut down October 16, 2026. If it 404s for you, check
+https://ai.google.dev/gemini-api/docs/models and set GEMINI_MODEL in .env
+to whatever the current cost-effective Flash-tier model is.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from forge_incident.models import Difficulty
 
 __all__ = ["GeminiLLMBackend"]
 
-_DEFAULT_MODEL = "gemini-2.0-flash"
+_DEFAULT_MODEL = "gemini-2.5-flash"
 
 _SYSTEM_PROMPT = """You are the scenario-planning module of ForgeIncident, an \
 offline DFIR/purple-team training-package generator. You never invent \
