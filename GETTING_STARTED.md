@@ -1,6 +1,6 @@
 # Getting Started with ForgeIncident
 
-A complete, beginner-friendly walkthrough: downloading the project, installing it on Windows/macOS/Linux, generating your first training package, requesting a new scenario in plain English, wiring up an LLM provider's API key, generating a genuinely brand-new scenario from a 56-category taxonomy, and publishing the project to GitHub.
+A complete, beginner-friendly walkthrough: downloading the project, installing it on Windows/macOS/Linux, generating your first training package, requesting a new scenario in plain English, wiring up an LLM provider's API key, and generating a genuinely brand-new scenario from a 56-category taxonomy.
 
 If you want the technical architecture (how the code is organized, the full YAML scenario schema for writing brand-new scenarios from scratch), see [README.md](README.md). This guide is the "just tell me what to type" version.
 
@@ -15,8 +15,9 @@ If you want the technical architecture (how the code is organized, the full YAML
 7. [Add an API key for an LLM provider](#7-add-an-api-key-for-an-llm-provider)
 8. [Generate a brand-new scenario (generate-category)](#8-generate-a-brand-new-scenario-generate-category)
 9. [Understand what you got: student vs. instructor package](#9-understand-what-you-got-student-vs-instructor-package)
-10. [Publish this project to GitHub](#10-publish-this-project-to-github)
-11. [Troubleshooting](#11-troubleshooting)
+10. [Troubleshooting](#10-troubleshooting)
+
+> **Publishing to GitHub:** those steps now live in `PUBLISHING_TO_GITHUB.md` in the project root — a local-only file (git-ignored, so it never gets uploaded to the repo it's explaining how to upload).
 
 ---
 
@@ -218,30 +219,7 @@ For the full list of categories and where they come from (OWASP's various Top 10
 
 Hand the student ZIP to trainees. Keep the instructor ZIP for yourself/your grading team — it's the one with the answers.
 
-## 10. Publish this project to GitHub
-
-If you haven't already turned this folder into a Git repository:
-
-```bash
-cd forge-incident
-git init
-git add .
-git commit -m "Initial commit: ForgeIncident"
-```
-
-(The `.gitignore` already excludes your `.env`, `.venv/`, `output/`, and generated ZIPs, so none of your secrets or generated packages get committed by accident — double check with `git status` before your first commit if you want to be extra sure.)
-
-Then, on [github.com](https://github.com/new), create a new **empty** repository (don't let GitHub add a README/license/`.gitignore` — you already have those). GitHub will show you a remote URL like `https://github.com/YOUR-USERNAME/forge-incident.git`. Back in your terminal:
-
-```bash
-git remote add origin https://github.com/YOUR-USERNAME/forge-incident.git
-git branch -M main
-git push -u origin main
-```
-
-You'll be prompted to authenticate — GitHub no longer accepts your account password for this; use a [Personal Access Token](https://github.com/settings/tokens) as the password, or set up the [GitHub CLI](https://cli.github.com/) (`gh auth login`) or an SSH key instead, whichever you're already comfortable with.
-
-## 11. Troubleshooting
+## 10. Troubleshooting
 
 **`forge-incident: command not found` (or `'forge-incident' is not recognized...` on Windows)**
 Your virtual environment isn't active. Re-run the activation command from Step 3 (you should see `(.venv)` at the start of your prompt), then try again. If it's still missing after activating, re-run `pip install -e ".[dev]"`.

@@ -59,6 +59,9 @@ generated/
 !scenarios/generated/
 !scenarios/generated/*.yaml
 
+# --- Local-only reference docs (intentionally never uploaded) ---
+PUBLISHING_TO_GITHUB.md
+
 # --- Editors / OS ---
 .vscode/
 .idea/
