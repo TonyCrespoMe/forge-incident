@@ -150,6 +150,30 @@ def test_api_key_backends_report_unavailable_without_a_key():
                 os.environ[key] = value
 
 
+def test_base_backend_generate_scenario_text_default_raises():
+    """Backends that don't override generate_scenario_text (i.e. only 'none'
+    relies on the base default — every API-key backend overrides it) get an
+    honest LLMBackendError rather than silently doing nothing."""
+    from forge_incident.llm.none import NoneLLMBackend
+
+    with pytest.raises(LLMBackendError, match="does not support brand-new scenario generation"):
+        NoneLLMBackend().generate_scenario_text(system_prompt="x", user_prompt="y")
+
+
+def test_api_key_backends_override_generate_scenario_text():
+    """claude/openai/gemini/grok/ollama must each define their own
+    generate_scenario_text (not silently fall back to the base class's
+    'unsupported' default) — generate-category requires a real backend."""
+    from forge_incident.llm.claude import ClaudeLLMBackend
+    from forge_incident.llm.gemini import GeminiLLMBackend
+    from forge_incident.llm.grok import GrokLLMBackend
+    from forge_incident.llm.ollama import OllamaLLMBackend
+    from forge_incident.llm.openai import OpenAILLMBackend
+
+    for cls in (ClaudeLLMBackend, OpenAILLMBackend, GeminiLLMBackend, GrokLLMBackend, OllamaLLMBackend):
+        assert "generate_scenario_text" in cls.__dict__, f"{cls.__name__} must override generate_scenario_text"
+
+
 def test_grok_backend_reads_either_xai_or_grok_api_key_env_var():
     from forge_incident.llm.grok import GrokLLMBackend
 

@@ -98,3 +98,68 @@ def test_jsonl_artifacts_are_parseable():
         assert lines
         for line in lines:
             json.loads(line)
+
+
+_CLOUD_YAML_TEMPLATE = """
+scenario_id: cloud-emitter-test
+title: "Cloud emitter test"
+description: >
+  Test.
+student_briefing: >
+  Test briefing.
+difficulty: beginner
+seed: 5
+organization:
+  name: Testco
+  domain: testco.example
+start_time: "2026-05-01T09:00:00Z"
+actors:
+  attacker:
+    username: unknown
+    email: unknown@unknown.external
+    display_name: Unknown
+timeline:
+  - id: e1
+    at: "+0m"
+    event_type: cloud_api_call
+    log_sources: [{log_source}]
+    severity: high
+    actor: attacker
+    description: test
+    cloud:
+      method_name: ListBuckets
+      service_name: example.amazonaws.com
+      resource_name: "*"
+      caller_ip: 185.220.101.47
+      status_code: "OK"
+      region: us-east-1
+"""
+
+
+def test_aws_cloudtrail_emitter_produces_valid_jsonl():
+    import json
+
+    from forge_incident.scenario_loader import load_scenario_from_text
+
+    scenario = load_scenario_from_text(_CLOUD_YAML_TEMPLATE.format(log_source="aws_cloudtrail"), seed=5)
+    artifacts = run_all(scenario)
+    assert len(artifacts) == 1
+    assert artifacts[0].relative_path.startswith("logs/aws_cloudtrail/")
+    record = json.loads(artifacts[0].content.strip().splitlines()[0])
+    assert record["eventName"] == "ListBuckets"
+    assert record["sourceIPAddress"] == "185.220.101.47"
+    assert record["awsRegion"] == "us-east-1"
+
+
+def test_azure_activity_emitter_produces_valid_jsonl():
+    import json
+
+    from forge_incident.scenario_loader import load_scenario_from_text
+
+    scenario = load_scenario_from_text(_CLOUD_YAML_TEMPLATE.format(log_source="azure_activity"), seed=5)
+    artifacts = run_all(scenario)
+    assert len(artifacts) == 1
+    assert artifacts[0].relative_path.startswith("logs/azure_activity/")
+    record = json.loads(artifacts[0].content.strip().splitlines()[0])
+    assert record["operationName"] == "ListBuckets"
+    assert record["callerIpAddress"] == "185.220.101.47"

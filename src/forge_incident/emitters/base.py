@@ -38,6 +38,7 @@ __all__ = [
     "group_by_host",
     "humanize_event_type",
     "gcp_rfc3339",
+    "iso8601_z_timestamp",
     "message_trace_timestamp",
     "pan_os_timestamp",
     "syslog_timestamp",
@@ -139,6 +140,15 @@ def group_by_host(events: list[Event], scenario: Scenario) -> dict[str, list[Eve
 def gcp_rfc3339(ts: datetime) -> str:
     """GCP Cloud Audit Log style: '2026-03-10T08:00:00.123456Z'."""
     return ts.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ts.microsecond:06d}Z"
+
+
+def iso8601_z_timestamp(ts: datetime) -> str:
+    """Whole-second ISO-8601 UTC, 'Z' suffix: '2026-04-15T09:00:00Z'.
+
+    Matches the style of AWS CloudTrail's `eventTime` and Azure Activity
+    Log / Entra sign-in log `time`/`createdDateTime` fields.
+    """
+    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def message_trace_timestamp(ts: datetime) -> str:

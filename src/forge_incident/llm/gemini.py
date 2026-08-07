@@ -140,3 +140,28 @@ class GeminiLLMBackend(LLMBackend):
             rationale=str(data.get("rationale", "")),
             backend_name=self.name,
         )
+
+    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+        try:
+            import google.generativeai as genai
+        except ImportError as exc:
+            raise LLMBackendError(
+                "The 'gemini' backend requires the google-generativeai package. Install it "
+                'with: pip install "forge-incident[gemini]"'
+            ) from exc
+
+        if not self.api_key:
+            raise LLMBackendError("GEMINI_API_KEY is not set. Add it to your .env (see .env.example).")
+
+        genai.configure(api_key=self.api_key)
+        model = genai.GenerativeModel(
+            model_name=self.model,
+            system_instruction=system_prompt,
+            generation_config={"max_output_tokens": max_tokens},
+        )
+        try:
+            response = model.generate_content(user_prompt)
+        except Exception as exc:
+            raise LLMBackendError(f"Gemini API call failed: {exc}") from exc
+
+        return getattr(response, "text", "") or ""

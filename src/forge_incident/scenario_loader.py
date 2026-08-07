@@ -53,6 +53,7 @@ __all__ = [
     "ScenarioLoadError",
     "ScenarioSummary",
     "load_scenario",
+    "load_scenario_from_text",
     "list_scenarios",
     "derive_rng",
 ]
@@ -186,22 +187,47 @@ def load_scenario(path: str | Path, seed: int | None = None) -> Scenario:
         raise ScenarioLoadError(f"Scenario file not found: {file_path}")
 
     try:
-        raw = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+        raw_text = file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ScenarioLoadError(f"Could not read {file_path}: {exc}") from exc
+
+    return load_scenario_from_text(raw_text, scenario_id=None, seed=seed, default_id=file_path.stem)
+
+
+def load_scenario_from_text(
+    yaml_text: str,
+    *,
+    scenario_id: str | None = None,
+    seed: int | None = None,
+    default_id: str = "<generated>",
+) -> Scenario:
+    """Load and validate a YAML scenario from an in-memory string.
+
+    Shares all validation logic with `load_scenario` (which is now a thin
+    wrapper around this function) — used directly by
+    `llm/scenario_generator.py` to validate LLM-generated scenario YAML
+    entirely in memory before anything touches disk. `scenario_id`
+    overrides any `scenario_id` key in the YAML itself (mainly so the
+    generator can assign a fresh, collision-free ID per attempt);
+    `default_id` is used only if neither is present.
+    """
+    try:
+        raw = yaml.safe_load(yaml_text)
     except yaml.YAMLError as exc:
-        raise ScenarioLoadError(f"YAML syntax error in {file_path}: {exc}") from exc
+        raise ScenarioLoadError(f"YAML syntax error: {exc}") from exc
 
     if not isinstance(raw, dict):
-        raise ScenarioLoadError(f"{file_path}: top-level YAML document must be a mapping")
+        raise ScenarioLoadError("Top-level YAML document must be a mapping")
 
-    scenario_id = raw.get("scenario_id", file_path.stem)
+    resolved_id = scenario_id or raw.get("scenario_id", default_id)
 
     try:
-        return _build_scenario(raw, scenario_id=scenario_id, seed_override=seed)
+        return _build_scenario(raw, scenario_id=resolved_id, seed_override=seed)
     except ScenarioLoadError:
         raise
     except ValidationError as exc:
         raise ScenarioLoadError(
-            f"[{scenario_id}] failed validation ({file_path}):\n{_format_pydantic_error(exc)}"
+            f"[{resolved_id}] failed validation:\n{_format_pydantic_error(exc)}"
         ) from exc
 
 

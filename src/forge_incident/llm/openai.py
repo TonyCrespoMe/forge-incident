@@ -139,3 +139,30 @@ class OpenAILLMBackend(LLMBackend):
             rationale=str(data.get("rationale", "")),
             backend_name=self.name,
         )
+
+    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+        try:
+            import openai
+        except ImportError as exc:
+            raise LLMBackendError(
+                "The 'openai' backend requires the openai package. Install it with: "
+                'pip install "forge-incident[openai]"'
+            ) from exc
+
+        if not self.api_key:
+            raise LLMBackendError("OPENAI_API_KEY is not set. Add it to your .env (see .env.example).")
+
+        client = openai.OpenAI(api_key=self.api_key)
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except Exception as exc:
+            raise LLMBackendError(f"OpenAI API call failed: {exc}") from exc
+
+        return response.choices[0].message.content or ""

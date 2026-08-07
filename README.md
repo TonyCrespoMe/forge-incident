@@ -2,9 +2,14 @@
 
 **ForgeIncident** is a local-first, fully offline tool for generating realistic, internally-consistent DFIR / purple-team investigation packages: a **student** ZIP (raw logs + a non-spoiler briefing) and a self-contained **instructor** ZIP (the same logs, plus an annotated kill-chain timeline, an answer key, and a machine-readable manifest for grading tooling).
 
-Every log file in a package — GCP Cloud Audit Log, Exchange Online Message Trace, Palo Alto traffic log, Linux syslog, Windows Event Log XML, and recovered `.eml` files — is rendered deterministically from **one shared event timeline**, so an IP address, username, PID, or file hash that shows up in one log shows up identically in every other log it should. That's the entire point of the exercise: students correlate evidence *across* log sources, and the tool guarantees that evidence is actually correlatable.
+Every log file in a package — GCP Cloud Audit Log, AWS CloudTrail, Azure Activity/Entra ID audit log, Exchange Online Message Trace, Palo Alto traffic log, Linux syslog, Windows Event Log XML, and recovered `.eml` files — is rendered deterministically from **one shared event timeline**, so an IP address, username, PID, or file hash that shows up in one log shows up identically in every other log it should. That's the entire point of the exercise: students correlate evidence *across* log sources, and the tool guarantees that evidence is actually correlatable.
 
-An LLM — Claude, OpenAI, Gemini, Grok, or a local Ollama model — is **entirely optional** and, if used, only turns a natural-language prompt into a choice of which bundled scenario to use plus a difficulty/title — it never writes a single log line. ForgeIncident works completely offline out of the box.
+An LLM — Claude, OpenAI, Gemini, Grok, or a local Ollama model — is **optional** for two different jobs, kept strictly separate:
+
+- **Planning** (`generate-nl`): turn a natural-language prompt into a choice of which bundled scenario to use plus a difficulty/title. Never writes a log line. Works fully offline via the default `none` backend.
+- **Generation** (`generate-category`): invent an entirely new scenario (org, actors, hosts, timeline, MITRE mapping) from a category + difficulty picked off a 56-category taxonomy (see [SCENARIO_CATEGORY_TAXONOMY.md](SCENARIO_CATEGORY_TAXONOMY.md)), validated through the exact same schema every hand-written scenario goes through, with an automatic validate/retry loop. Requires a real LLM backend (not `none`) and is explicitly flagged for instructor review — see [§ Generating brand-new scenarios](#generating-brand-new-scenarios).
+
+ForgeIncident works completely offline out of the box; only `generate-category` requires an LLM.
 
 > **New to this project?** [GETTING_STARTED.md](GETTING_STARTED.md) is the plain-language, OS-by-OS walkthrough (download → install → first package → API keys → publishing to GitHub). This README is the technical reference.
 
@@ -14,6 +19,7 @@ An LLM — Claude, OpenAI, Gemini, Grok, or a local Ollama model — is **entire
 - [Installation](#installation)
 - [Quickstart](#quickstart)
 - [CLI reference](#cli-reference)
+- [Generating brand-new scenarios](#generating-brand-new-scenarios)
 - [Architecture](#architecture)
 - [Writing your own scenario](#writing-your-own-scenario)
 - [Project layout](#project-layout)
@@ -29,7 +35,7 @@ Concretely:
 - `models.py` defines the shared data model (`Scenario`, `Event`, `Identity`, `Host`, and typed payloads like `EmailArtifact`/`NetworkInfo`/`ProcessInfo`/`CloudApiCall`/`FileInfo`). Every emitter reads from the *same* `Event` objects.
 - `scenario_loader.py` turns a YAML file into a validated `Scenario`, seeded for full reproducibility. Any randomness it introduces (small timestamp jitter) is derived from the scenario's `seed`, never from an unseeded `random` call.
 - `emitters/` render a `Scenario`'s timeline into realistic log formats. Emitters never invent an identifier that isn't already on the `Event` — a secondary ID a format needs (a GCP `insertId`, a PAN-OS session ID) is derived deterministically from the event's own ID via a stable hash, never `random`.
-- `llm/` backends (`none`, `claude`, `openai`, `gemini`, `grok`, `ollama`) only ever produce a small `ScenarioPlan` — which bundled template to use, an optional difficulty/title override. They cannot rename organizations, actors, or invent timeline events, because doing so would risk breaking the exact cross-file consistency the whole tool exists to guarantee.
+- `llm/` backends (`none`, `claude`, `openai`, `gemini`, `grok`, `ollama`) power two SEPARATE, narrow jobs. `plan_scenario()` (used by `generate-nl`) only ever produces a small `ScenarioPlan` — which bundled template to use, an optional difficulty/title override — and cannot rename organizations, actors, or invent timeline events. `generate_scenario_text()` (used only by `generate-category`, and NOT implemented by `none`) is the one place an LLM is trusted to invent a whole new scenario; its raw output is never trusted directly — `llm/scenario_generator.py` always runs it through the same `scenario_loader` validation every hand-written YAML goes through, retrying on failure, then a heuristic `llm/consistency.py` pass for issues schema validation can't catch (e.g. an IP that should recur across events but doesn't).
 - `packager.py` is the only module that touches disk. It splits content into student-safe (logs + a redacted, non-spoiler briefing) and instructor-only (the same logs + full narrative + answer key + manifest) — instructor-only fields like `Event.description` and `Event.mitre` are never rendered into a log file.
 
 ## Installation
@@ -90,6 +96,14 @@ Deterministic path: load a YAML scenario file, optionally overriding its declare
 
 Natural-language path. The chosen backend (default `none`, from `$FORGE_LLM_BACKEND`) maps your prompt to the closest bundled template and prints its `rationale` so the choice is never a black box. `--llm none` needs no dependency or network access; every other backend needs its API key set (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`/`XAI_API_KEY`) and its extra installed, except `--llm ollama`, which needs a running local `ollama serve` instead of a key. See [GETTING_STARTED.md § 7](GETTING_STARTED.md#7-add-an-api-key-for-an-llm-provider) for exact setup per provider.
 
+### `forge-incident categories [--domain DOMAIN_ID]`
+
+Lists the scenario category taxonomy `generate-category` draws from: 56 categories across 12 domains (OWASP Top 10:2025 web app, OWASP API Security Top 10, OWASP Top 10 CI/CD Security Risks, OWASP Top 10 for LLM Applications, OWASP Mobile Top 10, AWS, Azure/Entra ID, GCP, Windows/Active Directory, Linux/Unix, macOS, and cross-cutting DFIR staples like phishing/BEC/insider-threat/ransomware). See [SCENARIO_CATEGORY_TAXONOMY.md](SCENARIO_CATEGORY_TAXONOMY.md) for full sourcing and rationale.
+
+### `forge-incident generate-category --category ID [--difficulty ...] [--llm PROVIDER] [--seed N] [--max-attempts N] [--output DIR]`
+
+LLM-driven invention path — see [§ Generating brand-new scenarios](#generating-brand-new-scenarios) below.
+
 ### `forge-incident list [--scenarios-dir DIR]`
 
 Discovers and fully validates every `*.yaml`/`*.yml` in a directory (default `scenarios/`), printing ID, title, difficulty, event count, and tags. A scenario that fails validation is still listed, flagged invalid, with the actual error — so `list` doubles as a linter while you're authoring.
@@ -98,26 +112,52 @@ Discovers and fully validates every `*.yaml`/`*.yml` in a directory (default `sc
 
 Prints the installed version.
 
+## Generating brand-new scenarios
+
+`generate-nl` only ever picks among the YAML files already in `scenarios/`. `generate-category` is different: it asks a real LLM backend to invent an entirely new scenario — organization, actors, hosts, timeline, MITRE mapping, answer key — for a category + difficulty you choose, rather than free-text prompting for an open-ended idea. That's a deliberate, safer scope: a fixed category is a well-documented pattern the model has likely seen described many times, not an invitation to improvise a whole genre.
+
+```bash
+# Browse the taxonomy
+forge-incident categories
+forge-incident categories --domain windows_enterprise
+
+# Generate a new one (requires a real LLM backend — 'none' isn't enough here)
+forge-incident generate-category --category windows-ad-kerberoasting --difficulty advanced --llm claude
+```
+
+What happens under the hood:
+
+1. The chosen category's premise, suggested MITRE tactics/techniques, and suggested log sources are folded into a prompt, along with the full `Scenario` schema and one of the bundled scenarios as a formatting example (explicitly told not to reuse its story).
+2. The model's raw YAML output is run through the exact same `scenario_loader` validation every hand-written scenario goes through — referential integrity, enum validity, MITRE technique ID format, chronological order. On failure, the exact error is fed back to the model and it gets another attempt (`--max-attempts`, default 3).
+3. Once schema-valid, `llm/consistency.py` runs a second, heuristic pass looking for things schema validation can't catch — an actor/host defined but never used, an IP that looks like it was regenerated instead of reused, a filename that shows up with two different hashes, an unusually small/large event count for its difficulty. These are warnings, not blockers.
+4. The accepted YAML is saved to `scenarios/generated/` (so it's reviewable, diffable, and reusable exactly like a hand-written scenario), then packaged normally.
+5. The instructor package (never the student package) gets an explicit **"⚠ LLM-generated scenario — review before classroom use"** notice plus every consistency warning, in both `instructor/INSTRUCTOR_GUIDE.md` and the machine-readable `instructor/manifest.json` (`requires_instructor_review: true`).
+
+Treat a `generate-category` scenario the way you'd treat any new exercise someone handed you: read the instructor guide once before assigning it. The validate/retry loop guarantees it's *structurally* sound; it doesn't guarantee the narrative is pedagogically great on the first try.
+
 ## Architecture
 
 ```
 YAML scenario file ──► scenario_loader.load_scenario() ──► Scenario (validated, seeded)
                                                                  │
-natural-language prompt ──► llm.get_backend() ──► ScenarioPlan ──┘  (picks a template + seed;
-                                                                       never touches events)
+natural-language prompt ──► llm.get_backend() ──► ScenarioPlan ──┤  (picks a template + seed;
+                                                                 │     never touches events)
+category + difficulty ──► llm.generate_new_scenario() ──────────┤  (LLM invents a full Scenario;
+                     (validate/retry loop + consistency check)  │   validated before use, same as YAML)
                                                                  │
                                                                  ▼
                                               emitters.run_all(scenario)
-                                    ┌───────────┬───────────┬──────────┬─────────┬───────────┐
-                                    │ gcp_audit │  outlook_  │  palo_   │  linux  │  windows  │ email_eml
-                                    │           │ message_   │  alto    │         │           │
-                                    │           │  trace     │          │         │           │
-                                    └───────────┴───────────┴──────────┴─────────┴───────────┘
+                        ┌───────────┬─────────┬──────────┬───────────┬──────────┬─────────┬───────────┬───────────┐
+                        │ gcp_audit │   aws_  │  azure_  │  outlook_  │  palo_   │  linux  │  windows  │ email_eml │
+                        │           │ cloud   │ activity │  message_  │  alto    │         │           │           │
+                        │           │ trail   │          │   trace    │          │         │           │           │
+                        └───────────┴─────────┴──────────┴───────────┴──────────┴─────────┴───────────┴───────────┘
                                                                  │
                                                                  ▼
                                                 packager.build_packages()
                                                    ├── *-student.zip     (logs + non-spoiler README)
-                                                   └── *-instructor.zip  (logs + guide + answer key + manifest)
+                                                   └── *-instructor.zip  (logs + guide + answer key + manifest,
+                                                                          + LLM-generated review notice if applicable)
 ```
 
 Each emitter is a subclass of `emitters.base.Emitter` implementing one method, `emit(scenario) -> list[EmittedArtifact]`, and is registered in `emitters/__init__.py`'s `ALL_EMITTERS`. Adding a new log format means writing one new emitter and adding one line to that tuple — nothing else in the pipeline changes.
@@ -201,17 +241,21 @@ forge-incident/
 ├── pyproject.toml
 ├── README.md
 ├── GETTING_STARTED.md
+├── SCENARIO_CATEGORY_TAXONOMY.md   # sourcing/rationale for the 56-category taxonomy
 ├── .env.example
 ├── .gitignore
 ├── LICENSE
 ├── src/forge_incident/
-│   ├── cli.py                  # Typer CLI: generate, generate-nl, list
+│   ├── cli.py                  # Typer CLI: generate, generate-nl, generate-category, categories, list
 │   ├── models.py                # shared Scenario/Event data model
-│   ├── scenario_loader.py       # YAML -> validated, seeded Scenario
+│   ├── scenario_loader.py       # YAML/text -> validated, seeded Scenario
+│   ├── scenario_categories.py   # generate-category's taxonomy (domains + categories)
 │   ├── packager.py              # student/instructor ZIP assembly
-│   ├── llm/                     # optional NL scenario planning
+│   ├── llm/                     # optional NL planning + LLM-driven generation
 │   │   ├── base.py              # LLMBackend ABC, ScenarioPlan
-│   │   ├── none.py              # default: offline, keyword-based
+│   │   ├── scenario_generator.py # generate-category's prompt building + validate/retry loop
+│   │   ├── consistency.py       # heuristic semantic-consistency checker
+│   │   ├── none.py              # default: offline, keyword-based (planning only)
 │   │   ├── claude.py            # optional: Anthropic API
 │   │   ├── openai.py            # optional: OpenAI (ChatGPT/GPT)
 │   │   ├── gemini.py            # optional: Google Gemini
@@ -220,6 +264,8 @@ forge-incident/
 │   └── emitters/                # one module per rendered log format
 │       ├── base.py              # Emitter ABC, shared formatting helpers
 │       ├── gcp_audit.py
+│       ├── aws_cloudtrail.py
+│       ├── azure_activity.py
 │       ├── outlook_message_trace.py
 │       ├── palo_alto.py
 │       ├── linux.py
@@ -227,7 +273,8 @@ forge-incident/
 │       └── email_eml.py
 ├── scenarios/                    # bundled example scenarios (start here)
 │   ├── phishing_to_exfil.yaml
-│   └── gcp_key_compromise.yaml
+│   ├── gcp_key_compromise.yaml
+│   └── generated/                # generate-category's output lands here
 └── tests/
 ```
 

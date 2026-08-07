@@ -49,6 +49,8 @@ _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
 _LOG_SOURCE_BLURBS = {
     "gcp_audit": "GCP Cloud Audit Log export (JSON Lines)",
+    "aws_cloudtrail": "AWS CloudTrail export (JSON Lines)",
+    "azure_activity": "Azure Activity Log / Entra ID audit log export (JSON Lines)",
     "outlook_message_trace": "Exchange Online Message Trace export (CSV)",
     "palo_alto": "Palo Alto Networks (PAN-OS) traffic log export (CSV)",
     "linux": "Linux syslog / auth log export",
@@ -73,6 +75,8 @@ def build_packages(
     emitters: tuple[Emitter, ...] = ALL_EMITTERS,
     source_path: str | Path | None = None,
     generated_at: datetime | None = None,
+    llm_generated_by: str | None = None,
+    generation_warnings: list[str] | None = None,
 ) -> PackageResult:
     """Render every emitter and write the student + instructor ZIPs.
 
@@ -80,6 +84,14 @@ def build_packages(
     and seed so re-generating with a different seed never silently
     overwrites a previous run: `<scenario_id>-seed<seed>-student.zip` /
     `...-instructor.zip`.
+
+    `llm_generated_by` (a backend name, e.g. "claude") marks this package
+    as coming from `generate-category` rather than a hand-authored/
+    template-planned scenario — the instructor guide and manifest get an
+    explicit "review before classroom use" notice plus any
+    `generation_warnings` from `llm.consistency.check_consistency`. The
+    student package is never touched by this — students see identical
+    output either way, by design (see `packager.py`'s module docstring).
     """
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -89,7 +101,14 @@ def build_packages(
     artifacts = sorted(artifacts, key=lambda a: a.relative_path)
 
     student_files = _student_files(scenario, artifacts)
-    instructor_files = _instructor_files(scenario, artifacts, generated_at, source_path)
+    instructor_files = _instructor_files(
+        scenario,
+        artifacts,
+        generated_at,
+        source_path,
+        llm_generated_by=llm_generated_by,
+        generation_warnings=generation_warnings or [],
+    )
 
     stem = f"{scenario.scenario_id}-seed{scenario.seed}"
     student_zip = out_dir / f"{stem}-student.zip"
@@ -189,13 +208,27 @@ def _instructor_files(
     artifacts: list[EmittedArtifact],
     generated_at: datetime,
     source_path: str | Path | None,
+    *,
+    llm_generated_by: str | None = None,
+    generation_warnings: list[str] | None = None,
 ) -> dict[str, str]:
+    generation_warnings = generation_warnings or []
     files = {a.relative_path: a.content for a in artifacts}
     files["README.md"] = _student_readme(scenario, artifacts)
-    files["instructor/INSTRUCTOR_GUIDE.md"] = _instructor_guide(scenario, artifacts)
+    files["instructor/INSTRUCTOR_GUIDE.md"] = _instructor_guide(
+        scenario, artifacts, llm_generated_by=llm_generated_by, generation_warnings=generation_warnings
+    )
     files["instructor/ANSWER_KEY.md"] = _answer_key_markdown(scenario)
     files["instructor/manifest.json"] = json.dumps(
-        build_manifest(scenario, artifacts, generated_at), indent=2, sort_keys=True
+        build_manifest(
+            scenario,
+            artifacts,
+            generated_at,
+            llm_generated_by=llm_generated_by,
+            generation_warnings=generation_warnings,
+        ),
+        indent=2,
+        sort_keys=True,
     )
     if source_path is not None:
         src = Path(source_path)
@@ -204,10 +237,31 @@ def _instructor_files(
     return files
 
 
-def _instructor_guide(scenario: Scenario, artifacts: list[EmittedArtifact]) -> str:
-    lines = [
-        f"# Instructor Guide: {scenario.title}",
-        "",
+def _instructor_guide(
+    scenario: Scenario,
+    artifacts: list[EmittedArtifact],
+    *,
+    llm_generated_by: str | None = None,
+    generation_warnings: list[str] | None = None,
+) -> str:
+    lines = [f"# Instructor Guide: {scenario.title}", ""]
+    if llm_generated_by:
+        lines += [
+            f"> **⚠ LLM-generated scenario (backend: `{llm_generated_by}`).** This "
+            "scenario was written by an LLM from a category brief, then passed "
+            "ForgeIncident's structural validation — it was NOT hand-authored or "
+            "human-reviewed. Review the full narrative and timeline below before using "
+            "it with students, the same way you'd review any new exercise before "
+            "assigning it.",
+            "",
+        ]
+        if generation_warnings:
+            lines.append("**Automated consistency-check warnings (heuristic, review each one):**")
+            lines.append("")
+            for w in generation_warnings:
+                lines.append(f"- {w}")
+            lines.append("")
+    lines += [
         f"**Scenario ID:** {scenario.scenario_id}  ",
         f"**Seed:** {scenario.seed}  ",
         f"**Difficulty:** {scenario.difficulty.value}  ",
@@ -285,7 +339,12 @@ def _answer_key_markdown(scenario: Scenario) -> str:
 
 
 def build_manifest(
-    scenario: Scenario, artifacts: list[EmittedArtifact], generated_at: datetime
+    scenario: Scenario,
+    artifacts: list[EmittedArtifact],
+    generated_at: datetime,
+    *,
+    llm_generated_by: str | None = None,
+    generation_warnings: list[str] | None = None,
 ) -> dict:
     """Machine-readable instructor manifest — the same data as the human-readable
     guide, shaped for auto-grading or LMS import tooling."""
@@ -296,6 +355,9 @@ def build_manifest(
         "seed": scenario.seed,
         "title": scenario.title,
         "difficulty": scenario.difficulty.value,
+        "llm_generated_by": llm_generated_by,
+        "generation_warnings": generation_warnings or [],
+        "requires_instructor_review": llm_generated_by is not None,
         "mitre_tactics": scenario.mitre_tactics,
         "organization": {
             "name": scenario.organization.name,

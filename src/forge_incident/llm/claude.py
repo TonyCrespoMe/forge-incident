@@ -141,3 +141,32 @@ class ClaudeLLMBackend(LLMBackend):
             rationale=str(data.get("rationale", "")),
             backend_name=self.name,
         )
+
+    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise LLMBackendError(
+                "The 'claude' backend requires the anthropic package. Install it with: "
+                'pip install "forge-incident[claude]"'
+            ) from exc
+
+        if not self.api_key:
+            raise LLMBackendError(
+                "ANTHROPIC_API_KEY is not set. Add it to your .env (see .env.example)."
+            )
+
+        client = anthropic.Anthropic(api_key=self.api_key)
+        try:
+            response = client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+        except Exception as exc:
+            raise LLMBackendError(f"Claude API call failed: {exc}") from exc
+
+        return "".join(
+            block.text for block in response.content if getattr(block, "type", None) == "text"
+        )

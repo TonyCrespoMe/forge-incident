@@ -123,6 +123,8 @@ class LogSource(str, Enum):
     """
 
     GCP_AUDIT = "gcp_audit"
+    AWS_CLOUDTRAIL = "aws_cloudtrail"
+    AZURE_ACTIVITY = "azure_activity"
     OUTLOOK_MESSAGE_TRACE = "outlook_message_trace"
     PALO_ALTO = "palo_alto"
     LINUX = "linux"
@@ -347,17 +349,30 @@ class NetworkInfo(ForgeBaseModel):
 
 
 class CloudApiCall(ForgeBaseModel):
-    """Feeds the gcp_audit emitter."""
+    """Feeds the gcp_audit, aws_cloudtrail, and azure_activity emitters.
+
+    Deliberately one shared, provider-agnostic shape rather than three
+    separate models: which emitter renders a given event is determined by
+    `Event.log_sources`, not by which fields are populated here. `project_id`
+    doubles as GCP project / AWS account ID / Azure subscription ID
+    depending on which log source(s) the event targets.
+    """
 
     method_name: str = Field(
-        ..., description="e.g. 'google.iam.admin.v1.CreateServiceAccountKey'"
+        ..., description="e.g. 'google.iam.admin.v1.CreateServiceAccountKey', 'ConsoleLogin', 'Microsoft.Storage/...'"
     )
-    service_name: str = Field(..., description="e.g. 'iam.googleapis.com'")
+    service_name: str = Field(..., description="e.g. 'iam.googleapis.com', 'iam.amazonaws.com'")
     resource_name: str
     caller_ip: str
     user_agent: str | None = None
     status_code: str = Field(default="OK", description="'OK', 'PERMISSION_DENIED', etc.")
-    project_id: str | None = None
+    project_id: str | None = Field(
+        default=None,
+        description="GCP project ID, AWS account ID, or Azure subscription ID, as applicable",
+    )
+    region: str | None = Field(
+        default=None, description="AWS region or Azure region, e.g. 'us-east-1' — unused by GCP"
+    )
 
 
 # --------------------------------------------------------------------------

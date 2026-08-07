@@ -113,6 +113,33 @@ class LLMBackend(ABC):
     ) -> ScenarioPlan:
         """Turn a natural-language prompt into a structured ScenarioPlan."""
 
+    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+        """Raw text completion for full brand-new-scenario YAML generation.
+
+        Unlike `plan_scenario` (a small, narrowly-typed choice among
+        *existing* templates — see the Core Architecture Rule at the top
+        of this file), this is the one place a backend is trusted to
+        freely invent an entire scenario: organization, actors, hosts,
+        timeline, MITRE mappings, all of it. It is used ONLY by the
+        `generate-category` CLI flow (see `llm/scenario_generator.py`,
+        which builds `system_prompt`/`user_prompt` and runs the resulting
+        YAML through the exact same `scenario_loader` validation every
+        hand-written scenario goes through, with a validate/retry loop).
+        `generate`/`generate-nl` never call this — those commands only
+        ever use `plan_scenario`, so their determinism guarantee is
+        untouched by this method's existence.
+
+        The default implementation raises: not every backend can support
+        this well (see `llm/none.py`, which explicitly cannot — genuine
+        scenario invention needs real model creativity, not keyword
+        matching). Backends that do support it (claude/openai/gemini/
+        grok/ollama) override this.
+        """
+        raise LLMBackendError(
+            f"The '{self.name}' backend does not support brand-new scenario generation "
+            "(generate-category). Use --llm claude/openai/gemini/grok/ollama instead."
+        )
+
 
 def resolve_template_path(template: str, scenarios_dir: str | Path = "scenarios") -> Path:
     """Resolve a template name (e.g. 'phishing_to_exfil') to its YAML file.

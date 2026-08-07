@@ -8,6 +8,8 @@ log format means writing one `Emitter` subclass and adding one line here
 
 from __future__ import annotations
 
+from forge_incident.emitters.aws_cloudtrail import AwsCloudTrailEmitter
+from forge_incident.emitters.azure_activity import AzureActivityEmitter
 from forge_incident.emitters.base import EmittedArtifact, Emitter
 from forge_incident.emitters.email_eml import EmailEmitter
 from forge_incident.emitters.gcp_audit import GcpAuditEmitter
@@ -21,6 +23,8 @@ __all__ = [
     "EmittedArtifact",
     "Emitter",
     "GcpAuditEmitter",
+    "AwsCloudTrailEmitter",
+    "AzureActivityEmitter",
     "OutlookMessageTraceEmitter",
     "PaloAltoEmitter",
     "LinuxEmitter",
@@ -32,6 +36,8 @@ __all__ = [
 
 ALL_EMITTERS: tuple[Emitter, ...] = (
     GcpAuditEmitter(),
+    AwsCloudTrailEmitter(),
+    AzureActivityEmitter(),
     OutlookMessageTraceEmitter(),
     PaloAltoEmitter(),
     LinuxEmitter(),

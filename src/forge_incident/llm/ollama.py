@@ -149,3 +149,39 @@ class OllamaLLMBackend(LLMBackend):
             rationale=str(data.get("rationale", "")),
             backend_name=self.name,
         )
+
+    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+        try:
+            import httpx
+        except ImportError as exc:
+            raise LLMBackendError(
+                "The 'ollama' backend requires the httpx package. Install it with: "
+                'pip install "forge-incident[ollama]"'
+            ) from exc
+
+        try:
+            resp = httpx.post(
+                f"{self.host}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "stream": False,
+                    "options": {"num_predict": max_tokens},
+                },
+                timeout=180.0,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            raise LLMBackendError(
+                f"Could not reach Ollama at {self.host} (is `ollama serve` running, and is "
+                f"'{self.model}' pulled?): {exc}"
+            ) from exc
+
+        try:
+            body = resp.json()
+            return body["message"]["content"]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise LLMBackendError(f"Unexpected response shape from Ollama: {resp.text}") from exc

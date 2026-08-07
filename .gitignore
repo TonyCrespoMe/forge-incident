@@ -54,6 +54,10 @@ out/
 generated/
 *.zip
 !scenarios/**/*.zip
+# generate-category's accepted output is deliberately tracked (reviewable/
+# diffable/reusable exactly like a hand-written scenario), unlike output/ ZIPs:
+!scenarios/generated/
+!scenarios/generated/*.yaml
 
 # --- Editors / OS ---
 .vscode/

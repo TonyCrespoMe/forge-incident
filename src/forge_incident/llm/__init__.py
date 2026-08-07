@@ -20,6 +20,11 @@ from forge_incident.llm.base import (
     build_scenario_from_plan,
     resolve_template_path,
 )
+from forge_incident.llm.scenario_generator import (
+    DEFAULT_MAX_ATTEMPTS,
+    GeneratedScenario,
+    generate_new_scenario,
+)
 
 __all__ = [
     "LLMBackend",
@@ -30,6 +35,9 @@ __all__ = [
     "resolve_template_path",
     "get_backend",
     "BACKEND_NAMES",
+    "GeneratedScenario",
+    "generate_new_scenario",
+    "DEFAULT_MAX_ATTEMPTS",
 ]
 
 BACKEND_NAMES: tuple[str, ...] = ("none", "claude", "openai", "gemini", "grok", "ollama")

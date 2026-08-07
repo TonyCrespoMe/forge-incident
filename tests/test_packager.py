@@ -74,6 +74,41 @@ def test_instructor_zip_byte_identical_with_fixed_generated_at(tmp_path):
     assert r1.instructor_zip.read_bytes() == r2.instructor_zip.read_bytes()
 
 
+def test_llm_generated_flag_appears_in_instructor_package_only(tmp_path):
+    scenario = load_scenario(SCENARIOS_DIR / "phishing_to_exfil.yaml")
+    result = build_packages(
+        scenario,
+        tmp_path,
+        llm_generated_by="claude",
+        generation_warnings=["example warning"],
+    )
+    with zipfile.ZipFile(result.instructor_zip) as zf:
+        guide = zf.read("instructor/INSTRUCTOR_GUIDE.md").decode()
+        manifest = json.loads(zf.read("instructor/manifest.json"))
+    with zipfile.ZipFile(result.student_zip) as zf:
+        student_readme = zf.read("README.md").decode()
+
+    assert "LLM-generated scenario" in guide
+    assert "claude" in guide
+    assert "example warning" in guide
+    assert manifest["llm_generated_by"] == "claude"
+    assert manifest["generation_warnings"] == ["example warning"]
+    assert manifest["requires_instructor_review"] is True
+    assert "LLM-generated" not in student_readme
+    assert "claude" not in student_readme
+
+
+def test_hand_authored_package_has_no_llm_generated_flag(tmp_path):
+    scenario = load_scenario(SCENARIOS_DIR / "phishing_to_exfil.yaml")
+    result = build_packages(scenario, tmp_path)
+    with zipfile.ZipFile(result.instructor_zip) as zf:
+        guide = zf.read("instructor/INSTRUCTOR_GUIDE.md").decode()
+        manifest = json.loads(zf.read("instructor/manifest.json"))
+    assert "LLM-generated scenario" not in guide
+    assert manifest["llm_generated_by"] is None
+    assert manifest["requires_instructor_review"] is False
+
+
 def test_different_seeds_produce_different_filenames(tmp_path):
     a = load_scenario(SCENARIOS_DIR / "phishing_to_exfil.yaml", seed=1)
     b = load_scenario(SCENARIOS_DIR / "phishing_to_exfil.yaml", seed=2)

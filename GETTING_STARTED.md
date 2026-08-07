@@ -1,6 +1,6 @@
 # Getting Started with ForgeIncident
 
-A complete, beginner-friendly walkthrough: downloading the project, installing it on Windows/macOS/Linux, generating your first training package, requesting a new scenario in plain English, wiring up an LLM provider's API key, and publishing the project to GitHub.
+A complete, beginner-friendly walkthrough: downloading the project, installing it on Windows/macOS/Linux, generating your first training package, requesting a new scenario in plain English, wiring up an LLM provider's API key, generating a genuinely brand-new scenario from a 56-category taxonomy, and publishing the project to GitHub.
 
 If you want the technical architecture (how the code is organized, the full YAML scenario schema for writing brand-new scenarios from scratch), see [README.md](README.md). This guide is the "just tell me what to type" version.
 
@@ -13,9 +13,10 @@ If you want the technical architecture (how the code is organized, the full YAML
 5. [Generate your first package](#5-generate-your-first-package)
 6. [Request a new scenario in plain English](#6-request-a-new-scenario-in-plain-english)
 7. [Add an API key for an LLM provider](#7-add-an-api-key-for-an-llm-provider)
-8. [Understand what you got: student vs. instructor package](#8-understand-what-you-got-student-vs-instructor-package)
-9. [Publish this project to GitHub](#9-publish-this-project-to-github)
-10. [Troubleshooting](#10-troubleshooting)
+8. [Generate a brand-new scenario (generate-category)](#8-generate-a-brand-new-scenario-generate-category)
+9. [Understand what you got: student vs. instructor package](#9-understand-what-you-got-student-vs-instructor-package)
+10. [Publish this project to GitHub](#10-publish-this-project-to-github)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -179,7 +180,30 @@ The 'claude' backend isn't available (missing dependency, API key, or unreachabl
 Try --llm none to generate fully offline, or check your .env against .env.example.
 ```
 
-## 8. Understand what you got: student vs. instructor package
+## 8. Generate a brand-new scenario (generate-category)
+
+Step 6's `generate-nl` only ever picks among the scenario files already in `scenarios/`. If you want an actually NEW scenario — a fresh org, fresh timeline, a category neither bundled scenario covers (a Windows Kerberoasting attack, an AWS leaked-key incident, a phishing-driven business email compromise, an LLM chatbot prompt-injection scenario, and 50-odd more) — that's `generate-category`. It requires a real LLM backend (set up in Step 7 first — `--llm none` doesn't work here, since inventing a whole new scenario needs actual model creativity, not keyword matching).
+
+First, see what's available:
+
+```bash
+forge-incident categories                          # everything, grouped by domain
+forge-incident categories --domain windows_enterprise   # just one domain
+```
+
+Then generate one:
+
+```bash
+forge-incident generate-category --category windows-ad-kerberoasting --difficulty advanced --llm claude
+```
+
+What you'll see: the tool tells you which attempt it succeeded on (it automatically retries up to 3 times if the model's first attempt doesn't pass validation), prints any consistency warnings, saves the generated YAML into `scenarios/generated/` (so you can read/edit/reuse it exactly like a hand-written one), and packages it exactly like every other command.
+
+**One thing to know:** the instructor ZIP for a `generate-category` scenario is explicitly marked "⚠ LLM-generated scenario — review before classroom use" at the top of `INSTRUCTOR_GUIDE.md`, along with any automated consistency warnings. Give it the same once-over you'd give any new exercise before assigning it — the validate/retry loop guarantees it's structurally sound (every reference resolves, every ID is well-formed), not that the story is polished on the first try. The student package is completely unaffected by any of this — students never see a difference between a hand-written and an LLM-generated scenario.
+
+For the full list of categories and where they come from (OWASP's various Top 10 lists, MITRE ATT&CK, CISA/cloud-provider incident-response guidance), see [SCENARIO_CATEGORY_TAXONOMY.md](SCENARIO_CATEGORY_TAXONOMY.md).
+
+## 9. Understand what you got: student vs. instructor package
 
 | | Student ZIP | Instructor ZIP |
 |---|---|---|
@@ -192,7 +216,7 @@ Try --llm none to generate fully offline, or check your .env against .env.exampl
 
 Hand the student ZIP to trainees. Keep the instructor ZIP for yourself/your grading team — it's the one with the answers.
 
-## 9. Publish this project to GitHub
+## 10. Publish this project to GitHub
 
 If you haven't already turned this folder into a Git repository:
 
@@ -215,7 +239,7 @@ git push -u origin main
 
 You'll be prompted to authenticate — GitHub no longer accepts your account password for this; use a [Personal Access Token](https://github.com/settings/tokens) as the password, or set up the [GitHub CLI](https://cli.github.com/) (`gh auth login`) or an SSH key instead, whichever you're already comfortable with.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 **`forge-incident: command not found` (or `'forge-incident' is not recognized...` on Windows)**
 Your virtual environment isn't active. Re-run the activation command from Step 3 (you should see `(.venv)` at the start of your prompt), then try again. If it's still missing after activating, re-run `pip install -e ".[dev]"`.

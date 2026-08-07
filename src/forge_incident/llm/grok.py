@@ -145,3 +145,30 @@ class GrokLLMBackend(LLMBackend):
             rationale=str(data.get("rationale", "")),
             backend_name=self.name,
         )
+
+    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+        try:
+            import openai
+        except ImportError as exc:
+            raise LLMBackendError(
+                "The 'grok' backend requires the openai package (xAI's API is OpenAI-SDK-"
+                'compatible). Install it with: pip install "forge-incident[grok]"'
+            ) from exc
+
+        if not self.api_key:
+            raise LLMBackendError("XAI_API_KEY is not set. Add it to your .env (see .env.example).")
+
+        client = openai.OpenAI(api_key=self.api_key, base_url=_XAI_BASE_URL)
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except Exception as exc:
+            raise LLMBackendError(f"Grok API call failed: {exc}") from exc
+
+        return response.choices[0].message.content or ""
