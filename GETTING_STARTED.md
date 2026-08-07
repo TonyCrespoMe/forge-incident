@@ -203,6 +203,8 @@ What you'll see: the tool tells you which attempt it succeeded on (it automatica
 
 For the full list of categories and where they come from (OWASP's various Top 10 lists, MITRE ATT&CK, CISA/cloud-provider incident-response guidance), see [SCENARIO_CATEGORY_TAXONOMY.md](SCENARIO_CATEGORY_TAXONOMY.md).
 
+**This costs real money** (except `--llm ollama`, which runs on your own machine for free) — every `generate-category` call is a billed API request. Expect roughly a fraction of a cent to a couple of cents per scenario on OpenAI/Gemini/Grok, and low-teens-of-cents on Claude, more if the validate/retry loop needs a second attempt. See [COST_ESTIMATES.md](COST_ESTIMATES.md) for the dated, per-backend, per-difficulty breakdown — "dated" because LLM pricing (and which model names still work) changes every few months.
+
 ## 9. Understand what you got: student vs. instructor package
 
 | | Student ZIP | Instructor ZIP |

@@ -135,6 +135,8 @@ What happens under the hood:
 
 Treat a `generate-category` scenario the way you'd treat any new exercise someone handed you: read the instructor guide once before assigning it. The validate/retry loop guarantees it's *structurally* sound; it doesn't guarantee the narrative is pedagogically great on the first try.
 
+Every `generate-category` call is a real, billed API request (except `--llm ollama`, which runs locally). See [COST_ESTIMATES.md](COST_ESTIMATES.md) for a per-backend, per-difficulty cost estimate — dated, since LLM pricing and even which model names still work changes every few months.
+
 ## Architecture
 
 ```
@@ -242,6 +244,7 @@ forge-incident/
 ├── README.md
 ├── GETTING_STARTED.md
 ├── SCENARIO_CATEGORY_TAXONOMY.md   # sourcing/rationale for the 56-category taxonomy
+├── COST_ESTIMATES.md               # dated generate-category per-run cost estimates
 ├── .env.example
 ├── .gitignore
 ├── LICENSE
