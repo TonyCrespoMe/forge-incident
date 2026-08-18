@@ -15,7 +15,10 @@ If you want the technical architecture (how the code is organized, the full YAML
 7. [Add an API key for an LLM provider](#7-add-an-api-key-for-an-llm-provider)
 8. [Generate a brand-new scenario (generate-category)](#8-generate-a-brand-new-scenario-generate-category)
 9. [Understand what you got: student vs. instructor package](#9-understand-what-you-got-student-vs-instructor-package)
-10. [Troubleshooting](#10-troubleshooting)
+10. [Use the web UI instead of the command line](#10-use-the-web-ui-instead-of-the-command-line)
+11. [Load a scenario into your SIEM](#11-load-a-scenario-into-your-siem)
+12. [Score a student's work](#12-score-a-students-work)
+13. [Troubleshooting](#13-troubleshooting)
 
 > **Publishing to GitHub:** those steps now live in `PUBLISHING_TO_GITHUB.md` in the project root — a local-only file (git-ignored, so it never gets uploaded to the repo it's explaining how to upload).
 
@@ -212,6 +215,7 @@ For the full list of categories and where they come from (OWASP's various Top 10
 |---|---|---|
 | Mockup logs (firewall, email, Windows events, etc.) | ✅ | ✅ (identical bytes) |
 | Non-spoiler briefing (`README.md`) | ✅ | ✅ |
+| Blank `submission.json` to fill in | ✅ | ✅ |
 | Full narrative + MITRE ATT&CK mapping (`INSTRUCTOR_GUIDE.md`) | ❌ | ✅ |
 | Answer key / grading questions (`ANSWER_KEY.md`) | ❌ | ✅ |
 | Machine-readable manifest for grading tooling (`manifest.json`) | ❌ | ✅ |
@@ -219,7 +223,60 @@ For the full list of categories and where they come from (OWASP's various Top 10
 
 Hand the student ZIP to trainees. Keep the instructor ZIP for yourself/your grading team — it's the one with the answers.
 
-## 10. Troubleshooting
+## 10. Use the web UI instead of the command line
+
+If you'd rather click than type YAML:
+
+```bash
+pip install -e ".[webui]"
+forge-incident web
+```
+
+Your browser opens at `http://localhost:8501`. Pick a scenario in the sidebar, hit **Load scenario**, and you get tabs for editing the timeline in a spreadsheet-style grid, editing metadata, viewing/editing the raw YAML, generating packages (with download buttons), exporting to a SIEM, scoring a submission, and seeing which log generators are loaded.
+
+Everything the UI does calls the same code the CLI does — a package built in the browser is byte-identical to one built with `forge-incident generate` at the same seed. Nothing is "web-only" or "CLI-only."
+
+One nicety worth knowing: if you delete a timeline row that one of your answer-key questions refers to, the UI catches it and offers to clean up the broken reference, instead of letting you finish your edits and then failing validation.
+
+## 11. Load a scenario into your SIEM
+
+Instead of handing students flat log files, you can load the whole scenario into Splunk, Elastic, or Microsoft Sentinel and have them work it in the tool they'll actually use at work:
+
+```bash
+forge-incident export scenarios/phishing_to_exfil.yaml
+```
+
+That writes files under `output/siem/`:
+
+- **Splunk** — `*-hec.json`, ready to POST at your HTTP Event Collector.
+- **Elastic** — `*-bulk.ndjson`, ECS-mapped so Kibana's built-in dashboards and ECS detection rules work immediately.
+- **Sentinel** — a Log Analytics JSON file **plus a starter `.kql` file** with five working queries, so you can paste something useful into the Logs blade instead of reverse-engineering column names.
+
+Pick specific formats with `-f`: `forge-incident export scenario.yaml -f splunk -f elastic`.
+
+The SIEM export and the student log package describe the exact same incident with the exact same IPs, hostnames, and hashes — so a common setup is: hand students the raw logs, load the SIEM export yourself, then use it for the debrief.
+
+## 12. Score a student's work
+
+Every student package now includes a blank `submission.json`. Students fill it in as they investigate — one entry per suspicious event they find, plus answers to the questions. When they hand it back:
+
+```bash
+forge-incident score scenarios/phishing_to_exfil.yaml submission.json --seed 20260310 -o ./reports
+```
+
+You get three numbers, each answering something different:
+
+- **Detection coverage** — did they find the attack? Also broken down per ATT&CK tactic, so you can see *which phase* they missed rather than just a single percentage.
+- **Precision / false positives** — did they flag benign activity too? Tracked separately, because otherwise an analyst who flags literally everything scores 100% coverage.
+- **Response time** — how long after each event did they catch it, and how long was the attacker operating before their first correct detection.
+
+`-o ./reports` also writes a full Markdown report (with the missed events spelled out) and a JSON version for gradebook tooling.
+
+**Important:** pass the same `--seed` the student's package was generated with. Timestamps are seeded, so a mismatched seed makes response-time scoring meaningless.
+
+Written answers are shown for you to mark by hand — they're deliberately not auto-graded, since judging prose is a human job.
+
+## 13. Troubleshooting
 
 **`forge-incident: command not found` (or `'forge-incident' is not recognized...` on Windows)**
 Your virtual environment isn't active. Re-run the activation command from Step 3 (you should see `(.venv)` at the start of your prompt), then try again. If it's still missing after activating, re-run `pip install -e ".[dev]"`.

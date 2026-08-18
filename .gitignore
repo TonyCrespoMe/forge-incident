@@ -62,6 +62,12 @@ generated/
 # --- Local-only reference docs (intentionally never uploaded) ---
 PUBLISHING_TO_GITHUB.md
 
+# --- User-installed emitter plugins ---
+# Local plugins are the user's own; the directory + its README stay tracked
+# so the extension point is discoverable, but plugin .py files don't ship.
+plugins/*.py
+!plugins/README.md
+
 # --- Editors / OS ---
 .vscode/
 .idea/

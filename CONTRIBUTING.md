@@ -24,7 +24,8 @@ Both run automatically on every push/PR via GitHub Actions (`.github/workflows/t
 ## What's easy to contribute
 
 - **A new scenario category's few-shot handling** or a fix to an existing category's premise/MITRE mapping in `src/forge_incident/scenario_categories.py` — see [SCENARIO_CATEGORY_TAXONOMY.md](SCENARIO_CATEGORY_TAXONOMY.md) for sourcing conventions.
-- **A new emitter** (e.g. a native macOS Unified Log format, Kubernetes audit logs, a real Sysmon-config-aware Windows variant) — see `src/forge_incident/emitters/base.py`'s docstring and any existing emitter for the pattern; register it in `emitters/__init__.py`'s `ALL_EMITTERS`.
+- **A new emitter** (e.g. a native macOS Unified Log format, Kubernetes audit logs, a real Sysmon-config-aware Windows variant) — see `src/forge_incident/emitters/base.py`'s docstring and any existing emitter for the pattern; register it in `emitters/__init__.py`'s `BUILTIN_EMITTERS`. If it's for your own course rather than something to upstream, write it as a **plugin** instead (drop a file in `plugins/` — see `plugins/README.md`), which needs no fork and no PR.
+- **A new SIEM exporter** (QRadar, Chronicle, Sumo Logic…) — subclass `siem.base.SiemExporter`, add one line to `siem/__init__.py`'s `ALL_EXPORTERS`.
 - **A new hand-written scenario YAML** under `scenarios/` — see the "Writing your own scenario" section of [README.md](README.md).
 - Bug reports and small fixes, obviously.
 

@@ -2,7 +2,9 @@
 
 **ForgeIncident** is a local-first, fully offline tool for generating realistic, internally-consistent DFIR / purple-team investigation packages: a **student** ZIP (raw logs + a non-spoiler briefing) and a self-contained **instructor** ZIP (the same logs, plus an annotated kill-chain timeline, an answer key, and a machine-readable manifest for grading tooling).
 
-Every log file in a package — GCP Cloud Audit Log, AWS CloudTrail, Azure Activity/Entra ID audit log, Exchange Online Message Trace, Palo Alto traffic log, Linux syslog, Windows Event Log XML, and recovered `.eml` files — is rendered deterministically from **one shared event timeline**, so an IP address, username, PID, or file hash that shows up in one log shows up identically in every other log it should. That's the entire point of the exercise: students correlate evidence *across* log sources, and the tool guarantees that evidence is actually correlatable.
+Every log file in a package — GCP Cloud Audit Log, AWS CloudTrail, Azure Activity/Entra ID audit log, Okta System Log, CrowdStrike Falcon detections, Exchange Online Message Trace, Palo Alto traffic log, FortiGate-style firewall syslog, Linux syslog, Windows Event Log XML, and recovered `.eml` files — is rendered deterministically from **one shared event timeline**, so an IP address, username, PID, or file hash that shows up in one log shows up identically in every other log it should. That's the entire point of the exercise: students correlate evidence *across* log sources, and the tool guarantees that evidence is actually correlatable. Need a format that isn't built in? Write a [plugin](#plugins-custom-log-generators).
+
+Beyond generating evidence, ForgeIncident also **exports to SIEMs** (Splunk, Elastic, Microsoft Sentinel) so exercises can run inside the tool students actually use, **scores submissions** (detection coverage, false positives, response time), and ships a **web UI** for editing timelines without touching YAML.
 
 An LLM — Claude, OpenAI, Gemini, Grok, or a local Ollama model — is **optional** for two different jobs, kept strictly separate:
 
@@ -20,6 +22,10 @@ ForgeIncident works completely offline out of the box; only `generate-category` 
 - [Quickstart](#quickstart)
 - [CLI reference](#cli-reference)
 - [Generating brand-new scenarios](#generating-brand-new-scenarios)
+- [Web UI](#web-ui)
+- [SIEM export](#siem-export)
+- [Scoring a submission](#scoring-a-submission)
+- [Plugins: custom log generators](#plugins-custom-log-generators)
 - [Architecture](#architecture)
 - [Writing your own scenario](#writing-your-own-scenario)
 - [Project layout](#project-layout)
@@ -34,7 +40,9 @@ Concretely:
 
 - `models.py` defines the shared data model (`Scenario`, `Event`, `Identity`, `Host`, and typed payloads like `EmailArtifact`/`NetworkInfo`/`ProcessInfo`/`CloudApiCall`/`FileInfo`). Every emitter reads from the *same* `Event` objects.
 - `scenario_loader.py` turns a YAML file into a validated `Scenario`, seeded for full reproducibility. Any randomness it introduces (small timestamp jitter) is derived from the scenario's `seed`, never from an unseeded `random` call.
-- `emitters/` render a `Scenario`'s timeline into realistic log formats. Emitters never invent an identifier that isn't already on the `Event` — a secondary ID a format needs (a GCP `insertId`, a PAN-OS session ID) is derived deterministically from the event's own ID via a stable hash, never `random`.
+- `emitters/` render a `Scenario`'s timeline into realistic log formats. Emitters never invent an identifier that isn't already on the `Event` — a secondary ID a format needs (a GCP `insertId`, a PAN-OS session ID) is derived deterministically from the event's own ID via a stable hash, never `random`. Third-party plugin emitters go through the same path and get the same guarantee (see `emitters/registry.py`).
+- `siem/` exports the same timeline into SIEM ingest formats. Same `Scenario` in, so a SIEM export and a raw log package describe the same incident with the same identifiers.
+- `scoring.py` grades a student submission against the timeline. Deterministic, offline, no LLM — same inputs always produce the same numbers.
 - `llm/` backends (`none`, `claude`, `openai`, `gemini`, `grok`, `ollama`) power two SEPARATE, narrow jobs. `plan_scenario()` (used by `generate-nl`) only ever produces a small `ScenarioPlan` — which bundled template to use, an optional difficulty/title override — and cannot rename organizations, actors, or invent timeline events. `generate_scenario_text()` (used only by `generate-category`, and NOT implemented by `none`) is the one place an LLM is trusted to invent a whole new scenario; its raw output is never trusted directly — `llm/scenario_generator.py` always runs it through the same `scenario_loader` validation every hand-written YAML goes through, retrying on failure, then a heuristic `llm/consistency.py` pass for issues schema validation can't catch (e.g. an IP that should recur across events but doesn't).
 - `packager.py` is the only module that touches disk. It splits content into student-safe (logs + a redacted, non-spoiler briefing) and instructor-only (the same logs + full narrative + answer key + manifest) — instructor-only fields like `Event.description` and `Event.mitre` are never rendered into a log file.
 
@@ -58,6 +66,7 @@ pip install -e ".[openai]"       # OpenAI (ChatGPT/GPT)
 pip install -e ".[gemini]"       # Google Gemini
 pip install -e ".[grok]"         # xAI Grok
 pip install -e ".[ollama]"       # local Ollama (no API key needed)
+pip install -e ".[webui]"        # Streamlit web UI (no API key needed)
 pip install -e ".[dev]"          # pytest, ruff, mypy
 pip install -e ".[all]"          # everything above
 ```
@@ -82,6 +91,15 @@ forge-incident generate-nl "a phishing email that leads to lateral movement and 
 
 # Same, but ask Claude to pick/frame the scenario (requires ANTHROPIC_API_KEY)
 forge-incident generate-nl "ransomware at a small law firm" --llm claude --difficulty advanced
+
+# Export the same scenario into your SIEM instead of handing out flat files
+forge-incident export scenarios/phishing_to_exfil.yaml -f splunk
+
+# Grade a student's completed submission.json
+forge-incident score scenarios/phishing_to_exfil.yaml submission.json --seed 20260310
+
+# Edit timelines in a browser instead of YAML
+forge-incident web
 ```
 
 Each command writes two ZIPs to `./output/` (override with `--output`): `<scenario_id>-seed<seed>-student.zip` and `<scenario_id>-seed<seed>-instructor.zip`. Re-running the exact same command produces byte-identical student ZIPs — that's the "full seed-based reproducibility" guarantee, not just a claim about the data inside them.
@@ -107,6 +125,22 @@ LLM-driven invention path — see [§ Generating brand-new scenarios](#generatin
 ### `forge-incident list [--scenarios-dir DIR]`
 
 Discovers and fully validates every `*.yaml`/`*.yml` in a directory (default `scenarios/`), printing ID, title, difficulty, event count, and tags. A scenario that fails validation is still listed, flagged invalid, with the actual error — so `list` doubles as a linter while you're authoring.
+
+### `forge-incident export SCENARIO.yaml [-f splunk|elastic|sentinel] [--seed N] [--output DIR]`
+
+Export to SIEM ingest formats — see [§ SIEM export](#siem-export). Repeatable `-f`; default is all formats. Writes loose files, not ZIPs (you're feeding an ingest API, not a student).
+
+### `forge-incident score SCENARIO.yaml SUBMISSION.json [--seed N] [--output DIR]`
+
+Grade a student submission — see [§ Scoring a submission](#scoring-a-submission). `--output` writes both a Markdown report and a JSON sibling for gradebook tooling.
+
+### `forge-incident plugins [--plugins-dir DIR]`
+
+List built-in and plugin log generators, and report anything that failed to load with the specific reason — see [§ Plugins](#plugins-custom-log-generators).
+
+### `forge-incident web [--port 8501] [--scenarios-dir DIR]`
+
+Launch the browser UI — see [§ Web UI](#web-ui). Requires `pip install -e ".[webui]"`.
 
 ### `forge-incident version`
 
@@ -137,29 +171,147 @@ Treat a `generate-category` scenario the way you'd treat any new exercise someon
 
 Every `generate-category` call is a real, billed API request (except `--llm ollama`, which runs locally). See [COST_ESTIMATES.md](COST_ESTIMATES.md) for a per-backend, per-difficulty cost estimate — dated, since LLM pricing and even which model names still work changes every few months.
 
+## Web UI
+
+```bash
+pip install -e ".[webui]"
+forge-incident web
+```
+
+Opens a browser UI at `http://localhost:8501` with tabs for:
+
+- **Timeline** — an editable grid: change severities, retype descriptions, add rows for new events, delete rows to remove them. Typed payloads (`process`/`email`/`network`/`cloud`/`file`) are preserved through grid edits and edited in the YAML tab.
+- **Details** — title, difficulty, seed, organization, and the student-briefing/instructor-description split, side by side so you can see what each audience gets.
+- **YAML** — the full source, validated before any edit is applied, with download and save-to-disk.
+- **Generate** — build the student/instructor ZIPs and download or preview them in-browser.
+- **SIEM export** — pick formats, download a bundle.
+- **Score** — upload a student's `submission.json`, get coverage/precision/response-time metrics and a downloadable report.
+- **Plugins** — see which log generators are loaded and what failed to load.
+
+The UI calls exactly the same functions the CLI does, so a package built in the browser is byte-identical to `forge-incident generate` at the same seed. If you delete a timeline row the answer key references, the UI tells you up front and offers to clean up the dangling pointers rather than failing validation after you've finished editing.
+
+## SIEM export
+
+```bash
+forge-incident export scenarios/phishing_to_exfil.yaml                 # all formats
+forge-incident export scenarios/phishing_to_exfil.yaml -f splunk       # just one
+forge-incident export scenarios/phishing_to_exfil.yaml -f elastic -f sentinel
+```
+
+| Format | Output | Load it with |
+|---|---|---|
+| `splunk` | HEC newline-delimited JSON, flat CIM-style fields, `sourcetype=forge:*` | `curl` to `/services/collector/event` |
+| `elastic` | ECS 8.11-mapped `_bulk` NDJSON | `curl` to `_bulk` |
+| `sentinel` | Log Analytics rows for a `ForgeIncident_CL` custom table, **plus a starter `.kql` file** | Logs Ingestion API / DCR |
+
+The exports describe the same incident with the same identifiers as the raw log package, so you can hand students the raw logs and load the SIEM export yourself for the debrief. Unlike the student log package, SIEM exports **do** include ATT&CK fields (`threat.technique.id` and friends) — a SIEM export without them can't be used to validate detection rules, which is the main reason to load one. `Event.description` is never exported anywhere.
+
+## Scoring a submission
+
+Every student package now contains a blank `submission.json`. Students fill it in as they work; you grade it:
+
+```bash
+forge-incident score scenarios/phishing_to_exfil.yaml submission.json --seed 20260310 -o ./reports
+```
+
+```
+              Score: Jane Doe — Phishing to Data Exfiltration
+┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓
+┃ Metric                  ┃             Result ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
+│ Detection coverage      │      70%  (7/10)   │
+│ Precision               │      88%  (1 FP)   │
+│ Time to first detection │            12 min  │
+│ Mean detection latency  │            41 min  │
+└─────────────────────────┴────────────────────┘
+```
+
+Three metrics, each answering a different question:
+
+- **Detection coverage** — did they find the attack? Broken down per ATT&CK tactic, so "caught the malware, missed the entire exfiltration phase" is visible instead of averaged away.
+- **Precision / false positives** — tracked separately, because an analyst who flags everything would otherwise score 100% coverage.
+- **Response time** — per-detection latency plus time-to-first-detection measured from the first malicious event: the difference between "found it eventually" and "would have caught it before exfiltration."
+
+A detection opportunity is any event carrying an ATT&CK technique or severity `medium`+; everything else is benign, and flagging one is a false positive. No extra annotation needed — that falls out of fields scenarios already set. Scoring is deterministic and fully offline: same scenario + same submission always produces the same numbers, so two instructors agree by construction. Written answers are surfaced for manual review, never auto-graded.
+
+**Seeds matter here** — pass the same `--seed` the student's package was built with, or event timestamps (and therefore response-time scoring) won't line up.
+
+## Plugins: custom log generators
+
+Need a log format ForgeIncident doesn't ship? Write an emitter without forking the project. Two ways:
+
+**Drop a file in `./plugins/`** (zero ceremony — override the location with `$FORGE_PLUGINS_DIR`):
+
+```python
+# plugins/zeek.py
+from forge_incident.emitters import EmittedArtifact, PluginEmitter
+
+class ZeekEmitter(PluginEmitter):
+    log_source_name = "zeek"          # routed via extra.log_sources_extra
+
+    def emit(self, scenario):
+        events = [e for e in self.relevant_events(scenario) if e.network is not None]
+        if not events:
+            return []
+        lines = [f"{e.timestamp.timestamp():.6f}\t{e.network.src_ip}\t{e.network.dst_ip}"
+                 for e in events]
+        return [EmittedArtifact("logs/zeek/conn.log", "\n".join(lines) + "\n")]
+```
+
+Then route events to it in your scenario YAML:
+
+```yaml
+  - id: c2-beacon
+    log_sources: [palo_alto]          # built-in sources, as usual
+    extra:
+      log_sources_extra: [zeek]       # plugin sources
+```
+
+**Or publish an installable package**, declaring an entry point:
+
+```toml
+[project.entry-points."forge_incident.emitters"]
+zeek = "my_forge_plugin.zeek:ZeekEmitter"
+```
+
+Either way your emitter receives the exact same validated `Scenario` the built-ins do — so **plugin output is automatically consistent** with every built-in log; that guarantee is structural, not something you have to remember to honor.
+
+```bash
+forge-incident plugins        # what's loaded, and what failed to load
+```
+
+A plugin that fails to import, defines no emitter, or raises during `emit()` is isolated and reported — it never takes down an otherwise-valid generation run.
+
 ## Architecture
 
 ```
 YAML scenario file ──► scenario_loader.load_scenario() ──► Scenario (validated, seeded)
-                                                                 │
-natural-language prompt ──► llm.get_backend() ──► ScenarioPlan ──┤  (picks a template + seed;
-                                                                 │     never touches events)
-category + difficulty ──► llm.generate_new_scenario() ──────────┤  (LLM invents a full Scenario;
-                     (validate/retry loop + consistency check)  │   validated before use, same as YAML)
-                                                                 │
-                                                                 ▼
-                                              emitters.run_all(scenario)
-                        ┌───────────┬─────────┬──────────┬───────────┬──────────┬─────────┬───────────┬───────────┐
-                        │ gcp_audit │   aws_  │  azure_  │  outlook_  │  palo_   │  linux  │  windows  │ email_eml │
-                        │           │ cloud   │ activity │  message_  │  alto    │         │           │           │
-                        │           │ trail   │          │   trace    │          │         │           │           │
-                        └───────────┴─────────┴──────────┴───────────┴──────────┴─────────┴───────────┴───────────┘
-                                                                 │
-                                                                 ▼
-                                                packager.build_packages()
-                                                   ├── *-student.zip     (logs + non-spoiler README)
-                                                   └── *-instructor.zip  (logs + guide + answer key + manifest,
-                                                                          + LLM-generated review notice if applicable)
+web UI timeline edit ──► scenario_io round-trip ─────────┤   (re-validated before save)
+natural-language prompt ──► llm.get_backend() ──► Plan ──┤   (picks a template; never touches events)
+category + difficulty ──► llm.generate_new_scenario() ───┤   (LLM invents a full Scenario;
+                     (validate/retry + consistency check)│    validated before use, same as YAML)
+                                                         │
+                        ┌────────────────────────────────┴────────────────────────────┐
+                        ▼                                                             ▼
+            emitters.run_all(scenario)                                    siem.export_scenario(scenario)
+   ┌──────────┬────────┬─────────┬──────┬────────────┬───────┐         ┌────────┬─────────┬──────────┐
+   │ gcp_audit│  aws_  │  azure_ │ okta │ crowdstrike│ email │         │ splunk │ elastic │ sentinel │
+   │          │cloudtr.│ activity│      │            │ _eml  │         │  (HEC) │  (ECS)  │  (KQL)   │
+   ├──────────┼────────┼─────────┼──────┼────────────┴───────┤         └────────┴─────────┴──────────┘
+   │ palo_alto│firewall│  linux  │windows│ outlook_msg_trace │                       │
+   │          │_syslog │         │       │                   │                       ▼
+   ├──────────┴────────┴─────────┴───────┴───────────────────┤            loose files for SIEM ingest
+   │  + any plugin emitters (registry.py discovery)          │
+   └────────────────────────────┬────────────────────────────┘
+                                ▼
+                   packager.build_packages()
+                      ├── *-student.zip     (logs + non-spoiler README + blank submission.json)
+                      └── *-instructor.zip  (logs + guide + answer key + manifest)
+                                                     │
+                        student fills in submission.json, hands it back
+                                                     ▼
+                              scoring.score_submission(scenario, submission)
+                                 └── coverage / false positives / response time
 ```
 
 Each emitter is a subclass of `emitters.base.Emitter` implementing one method, `emit(scenario) -> list[EmittedArtifact]`, and is registered in `emitters/__init__.py`'s `ALL_EMITTERS`. Adding a new log format means writing one new emitter and adding one line to that tuple — nothing else in the pipeline changes.
@@ -249,35 +401,37 @@ forge-incident/
 ├── .gitignore
 ├── LICENSE
 ├── src/forge_incident/
-│   ├── cli.py                  # Typer CLI: generate, generate-nl, generate-category, categories, list
+│   ├── cli.py                   # Typer CLI: generate, export, score, plugins, web, …
 │   ├── models.py                # shared Scenario/Event data model
 │   ├── scenario_loader.py       # YAML/text -> validated, seeded Scenario
 │   ├── scenario_categories.py   # generate-category's taxonomy (domains + categories)
 │   ├── packager.py              # student/instructor ZIP assembly
+│   ├── scoring.py               # coverage / false positives / response time
 │   ├── llm/                     # optional NL planning + LLM-driven generation
 │   │   ├── base.py              # LLMBackend ABC, ScenarioPlan
 │   │   ├── scenario_generator.py # generate-category's prompt building + validate/retry loop
 │   │   ├── consistency.py       # heuristic semantic-consistency checker
 │   │   ├── none.py              # default: offline, keyword-based (planning only)
-│   │   ├── claude.py            # optional: Anthropic API
-│   │   ├── openai.py            # optional: OpenAI (ChatGPT/GPT)
-│   │   ├── gemini.py            # optional: Google Gemini
-│   │   ├── grok.py              # optional: xAI Grok
-│   │   └── ollama.py            # optional: local Ollama
-│   └── emitters/                # one module per rendered log format
-│       ├── base.py              # Emitter ABC, shared formatting helpers
-│       ├── gcp_audit.py
-│       ├── aws_cloudtrail.py
-│       ├── azure_activity.py
-│       ├── outlook_message_trace.py
-│       ├── palo_alto.py
-│       ├── linux.py
-│       ├── windows.py
-│       └── email_eml.py
+│   │   └── claude.py, openai.py, gemini.py, grok.py, ollama.py
+│   ├── emitters/                # one module per rendered log format
+│   │   ├── base.py              # Emitter ABC, shared formatting helpers
+│   │   ├── registry.py          # plugin discovery (entry points + ./plugins)
+│   │   ├── gcp_audit.py, aws_cloudtrail.py, azure_activity.py
+│   │   ├── okta.py, crowdstrike.py
+│   │   ├── palo_alto.py, firewall_syslog.py
+│   │   ├── linux.py, windows.py
+│   │   └── outlook_message_trace.py, email_eml.py
+│   ├── siem/                    # SIEM ingest-format exporters
+│   │   ├── base.py              # SiemExporter ABC + shared field resolution
+│   │   └── splunk.py, elastic.py, sentinel.py
+│   └── webui/                   # Streamlit UI (optional extra)
+│       ├── app.py               # widgets only
+│       └── scenario_io.py       # Scenario <-> editable dict <-> YAML (Streamlit-free, tested)
 ├── scenarios/                    # bundled example scenarios (start here)
 │   ├── phishing_to_exfil.yaml
 │   ├── gcp_key_compromise.yaml
 │   └── generated/                # generate-category's output lands here
+├── plugins/                      # drop custom emitters here (git-ignored by default)
 └── tests/
 ```
 

@@ -1,14 +1,22 @@
 """ForgeIncident command-line interface.
 
-Five commands, matching the project's ways to produce a package or browse
-what's available:
+Commands, grouped by what they're for:
 
+Producing a package
 - `forge-incident generate SCENARIO.yaml`        — deterministic, from a YAML file + seed
 - `forge-incident generate-nl "<prompt>"`         — natural-language planning (LLM optional)
 - `forge-incident generate-category`              — LLM invents a brand-new scenario from a
                                                      category + difficulty (LLM required)
+
+Running an exercise
+- `forge-incident export SCENARIO.yaml`           — SIEM ingest formats (Splunk/Elastic/Sentinel)
+- `forge-incident score SCENARIO.yaml SUB.json`   — grade a student submission
+
+Browsing / introspection
 - `forge-incident categories`                     — browse the scenario category taxonomy
 - `forge-incident list`                           — discover scenarios in a directory
+- `forge-incident plugins`                        — show loaded built-in + plugin log generators
+- `forge-incident web`                            — launch the browser UI
 
 Nothing in this module generates log content itself — it only wires
 together `scenario_loader`, `llm`, and `packager`, and is responsible for
@@ -18,7 +26,9 @@ of Python tracebacks.
 
 from __future__ import annotations
 
+import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +37,7 @@ from rich.console import Console
 from rich.table import Table
 
 from forge_incident import __version__
+from forge_incident.emitters import BUILTIN_EMITTERS, refresh_emitters
 from forge_incident.llm import (
     BACKEND_NAMES,
     DEFAULT_MAX_ATTEMPTS,
@@ -40,6 +51,13 @@ from forge_incident.models import Difficulty
 from forge_incident.packager import build_packages
 from forge_incident.scenario_categories import CATEGORIES, DOMAINS, categories_in_domain, get_category, get_domain
 from forge_incident.scenario_loader import ScenarioLoadError, list_scenarios, load_scenario
+from forge_incident.scoring import (
+    SubmissionError,
+    load_submission,
+    render_report_markdown,
+    score_submission,
+)
+from forge_incident.siem import EXPORTER_NAMES, UnknownExporterError, export_scenario
 
 app = typer.Typer(
     name="forge-incident",
@@ -430,6 +448,263 @@ def list_command(
             )
 
     console.print(table)
+
+
+# --------------------------------------------------------------------------
+# export — SIEM ingest formats
+# --------------------------------------------------------------------------
+
+
+@app.command("export")
+def export_command(
+    scenario_file: Path = typer.Argument(..., help="Path to a scenario YAML file."),
+    formats: Optional[list[str]] = typer.Option(
+        None,
+        "--format",
+        "-f",
+        help=(
+            f"SIEM format(s) to export; repeatable. Choices: {', '.join(EXPORTER_NAMES)}. "
+            "Default: all of them."
+        ),
+    ),
+    seed: Optional[int] = typer.Option(
+        None, "--seed", help="Override the seed declared in the scenario file."
+    ),
+    output: Path = typer.Option(
+        None, "--output", "-o", help="Directory to write the export files into."
+    ),
+) -> None:
+    """Export a scenario into SIEM ingest formats (Splunk, Elastic, Sentinel).
+
+    Unlike `generate`, this writes loose files rather than ZIPs — you're
+    feeding them to an ingest API, not handing them to a student. The
+    exported data describes the same incident, with the same identifiers,
+    as the raw log package for the same scenario + seed.
+    """
+    output_dir = output or Path(os.environ.get("FORGE_OUTPUT_DIR", "./output"))
+
+    try:
+        scenario = load_scenario(scenario_file, seed=seed)
+    except ScenarioLoadError as exc:
+        err_console.print(f"[bold red]Failed to load scenario:[/bold red] {exc}")
+        raise typer.Exit(code=1) from None
+
+    try:
+        artifacts = export_scenario(scenario, formats)
+    except UnknownExporterError as exc:
+        err_console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1) from None
+
+    console.print(
+        f"Exporting [bold]{scenario.title}[/bold] "
+        f"([cyan]{scenario.scenario_id}[/cyan], seed=[cyan]{scenario.seed}[/cyan], "
+        f"{scenario.event_count} events)"
+    )
+    for artifact in artifacts:
+        destination = output_dir / artifact.relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(artifact.content, encoding="utf-8")
+        console.print(f"  [green]wrote[/green] {destination}")
+        console.print(f"         {artifact.description}")
+
+
+# --------------------------------------------------------------------------
+# score — grade a student submission against ground truth
+# --------------------------------------------------------------------------
+
+
+@app.command("score")
+def score_command(
+    scenario_file: Path = typer.Argument(..., help="The scenario YAML the student worked."),
+    submission_file: Path = typer.Argument(..., help="The student's completed submission.json."),
+    seed: Optional[int] = typer.Option(
+        None,
+        "--seed",
+        help=(
+            "Seed the student's package was generated with. MUST match, or event "
+            "timestamps (and therefore response-time scoring) won't line up."
+        ),
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the full Markdown report (and a .json sibling) to this directory.",
+    ),
+) -> None:
+    """Score a student submission: detection coverage, false positives, response time.
+
+    Deterministic and fully offline — no LLM involved. The same scenario
+    (same seed) plus the same submission always produces the same numbers,
+    so two instructors grading the same work agree by construction.
+    """
+    try:
+        scenario = load_scenario(scenario_file, seed=seed)
+    except ScenarioLoadError as exc:
+        err_console.print(f"[bold red]Failed to load scenario:[/bold red] {exc}")
+        raise typer.Exit(code=1) from None
+
+    try:
+        submission = load_submission(submission_file)
+    except SubmissionError as exc:
+        err_console.print(f"[bold red]Failed to load submission:[/bold red] {exc}")
+        raise typer.Exit(code=1) from None
+
+    if submission.scenario_id and submission.scenario_id != scenario.scenario_id:
+        err_console.print(
+            f"[yellow]Warning:[/yellow] submission says scenario_id="
+            f"'{submission.scenario_id}' but you're scoring against "
+            f"'{scenario.scenario_id}'. Scoring anyway — check you picked the right file."
+        )
+
+    report = score_submission(scenario, submission)
+
+    table = Table(title=f"Score: {submission.analyst} — {scenario.title}")
+    table.add_column("Metric")
+    table.add_column("Result", justify="right")
+    table.add_row(
+        "Detection coverage",
+        f"{report.coverage_pct:.0f}%  ({report.detected_count}/{report.total_opportunities})",
+    )
+    table.add_row(
+        "Precision",
+        f"{report.precision_pct:.0f}%  "
+        f"({report.false_positive_count + report.unknown_event_id_count} false positive(s))",
+    )
+    ttfd = report.time_to_first_detection_seconds
+    table.add_row(
+        "Time to first detection", "n/a" if ttfd is None else f"{ttfd / 60:.0f} min"
+    )
+    mean_latency = report.mean_latency_seconds
+    table.add_row(
+        "Mean detection latency", "n/a" if mean_latency is None else f"{mean_latency / 60:.0f} min"
+    )
+    console.print(table)
+
+    if report.missed_event_ids:
+        console.print(
+            f"[yellow]Missed {len(report.missed_event_ids)} opportunity(ies):[/yellow] "
+            + ", ".join(report.missed_event_ids)
+        )
+
+    if output is not None:
+        output.mkdir(parents=True, exist_ok=True)
+        stem = f"{scenario.scenario_id}-{slugify_name(submission.analyst)}-score"
+        md_path = output / f"{stem}.md"
+        json_path = output / f"{stem}.json"
+        md_path.write_text(render_report_markdown(report, scenario), encoding="utf-8")
+        json_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        console.print(f"  [green]report[/green]: {md_path}")
+        console.print(f"  [green]data[/green]:   {json_path}")
+
+
+def slugify_name(value: str) -> str:
+    """Filesystem-safe slug for report filenames."""
+    keep = [ch.lower() if ch.isalnum() else "-" for ch in value.strip()]
+    slug = "".join(keep).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug or "anonymous"
+
+
+# --------------------------------------------------------------------------
+# plugins — show what custom log generators are loaded
+# --------------------------------------------------------------------------
+
+
+@app.command("plugins")
+def plugins_command(
+    plugins_dir: Optional[Path] = typer.Option(
+        None,
+        "--plugins-dir",
+        help="Directory of plugin .py files (default: $FORGE_PLUGINS_DIR, else ./plugins).",
+    ),
+) -> None:
+    """List built-in and plugin log generators, and report any that failed to load."""
+    discovery = refresh_emitters(plugins_dir=str(plugins_dir) if plugins_dir else None)
+
+    builtin_table = Table(title="Built-in log generators")
+    builtin_table.add_column("Log source", style="cyan")
+    builtin_table.add_column("Class")
+    for emitter in BUILTIN_EMITTERS:
+        source = getattr(emitter, "log_source", None)
+        builtin_table.add_row(source.value if source else "-", type(emitter).__name__)
+    console.print(builtin_table)
+
+    if discovery.loaded:
+        plugin_table = Table(title="Plugin log generators")
+        plugin_table.add_column("Log source", style="cyan")
+        plugin_table.add_column("Class")
+        plugin_table.add_column("Loaded from")
+        for origin, class_name in discovery.loaded:
+            matching = next(
+                (e for e in discovery.emitters if type(e).__name__ == class_name), None
+            )
+            source = ""
+            if matching is not None:
+                builtin_source = getattr(matching, "log_source", None)
+                source = (
+                    builtin_source.value
+                    if builtin_source
+                    else getattr(matching, "log_source_name", "")
+                )
+            plugin_table.add_row(source or "-", class_name, origin)
+        console.print(plugin_table)
+    else:
+        console.print(
+            "\nNo plugins loaded. Drop a .py file defining an Emitter subclass into "
+            "[cyan]./plugins/[/cyan] (or set $FORGE_PLUGINS_DIR) — see CONTRIBUTING.md."
+        )
+
+    if discovery.errors:
+        err_console.print("\n[bold red]Plugins that failed to load:[/bold red]")
+        for origin, message in discovery.errors:
+            err_console.print(f"  [red]{origin}[/red]: {message}")
+
+
+# --------------------------------------------------------------------------
+# web — launch the browser UI
+# --------------------------------------------------------------------------
+
+
+@app.command("web")
+def web_command(
+    port: int = typer.Option(8501, "--port", help="Port to serve the UI on."),
+    scenarios_dir: Path = typer.Option(
+        Path("scenarios"), "--scenarios-dir", help="Directory of scenarios to browse/edit."
+    ),
+) -> None:
+    """Launch the ForgeIncident web UI in your browser.
+
+    Requires the optional extra:  pip install "forge-incident[webui]"
+    """
+    try:
+        import streamlit  # noqa: F401
+    except ImportError:
+        err_console.print(
+            "[bold red]The web UI requires Streamlit.[/bold red] Install it with:\n"
+            '  pip install "forge-incident[webui]"'
+        )
+        raise typer.Exit(code=1) from None
+
+    import subprocess
+
+    app_path = Path(__file__).parent / "webui" / "app.py"
+    env = {**os.environ, "FORGE_SCENARIOS_DIR": str(scenarios_dir)}
+    console.print(f"Starting ForgeIncident web UI on [cyan]http://localhost:{port}[/cyan] …")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(app_path),
+            "--server.port",
+            str(port),
+        ],
+        env=env,
+        check=False,
+    )
 
 
 # --------------------------------------------------------------------------
