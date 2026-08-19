@@ -30,7 +30,7 @@ ForgeIncident works completely offline out of the box; only `generate-category` 
 - [Writing your own scenario](#writing-your-own-scenario)
 - [Project layout](#project-layout)
 - [Testing](#testing)
-- [License](#license)
+- [A note on the generated content](#a-note-on-the-generated-content)
 
 ## Core design rule
 
@@ -399,7 +399,6 @@ forge-incident/
 ├── COST_ESTIMATES.md               # dated generate-category per-run cost estimates
 ├── .env.example
 ├── .gitignore
-├── LICENSE
 ├── src/forge_incident/
 │   ├── cli.py                   # Typer CLI: generate, export, score, plugins, web, …
 │   ├── models.py                # shared Scenario/Event data model
@@ -443,6 +442,6 @@ pytest
 ruff check src tests
 ```
 
-## License
+## A note on the generated content
 
-MIT — see [LICENSE](LICENSE). Every scenario shipped with this project is entirely fictional; no real individuals, organizations, or systems are represented.
+Every scenario shipped with this project is entirely fictional. No real individuals, organizations, or systems are represented, and generated scenarios contain no functional exploit code by design.
