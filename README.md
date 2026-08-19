@@ -2,6 +2,12 @@
 
 **ForgeIncident** is a local-first, fully offline tool for generating realistic, internally-consistent DFIR / purple-team investigation packages: a **student** ZIP (raw logs + a non-spoiler briefing) and a self-contained **instructor** ZIP (the same logs, plus an annotated kill-chain timeline, an answer key, and a machine-readable manifest for grading tooling).
 
+## Overview video
+
+[![ForgeIncident — overview and walkthrough](https://img.youtube.com/vi/zax6765gajw/maxresdefault.jpg)](https://youtu.be/zax6765gajw)
+
+*A walkthrough of what ForgeIncident does, why cross-log consistency matters, and how to use it to practice. ▶ [Watch on YouTube](https://youtu.be/zax6765gajw)*
+
 Every log file in a package — GCP Cloud Audit Log, AWS CloudTrail, Azure Activity/Entra ID audit log, Okta System Log, CrowdStrike Falcon detections, Exchange Online Message Trace, Palo Alto traffic log, FortiGate-style firewall syslog, Linux syslog, Windows Event Log XML, and recovered `.eml` files — is rendered deterministically from **one shared event timeline**, so an IP address, username, PID, or file hash that shows up in one log shows up identically in every other log it should. That's the entire point of the exercise: students correlate evidence *across* log sources, and the tool guarantees that evidence is actually correlatable. Need a format that isn't built in? Write a [plugin](#plugins-custom-log-generators).
 
 Beyond generating evidence, ForgeIncident also **exports to SIEMs** (Splunk, Elastic, Microsoft Sentinel) so exercises can run inside the tool students actually use, **scores submissions** (detection coverage, false positives, response time), and ships a **web UI** for editing timelines without touching YAML.
@@ -13,10 +19,11 @@ An LLM — Claude, OpenAI, Gemini, Grok, or a local Ollama model — is **option
 
 ForgeIncident works completely offline out of the box; only `generate-category` requires an LLM.
 
-> **New to this project?** [GETTING_STARTED.md](GETTING_STARTED.md) is the plain-language, OS-by-OS walkthrough (download → install → first package → API keys → publishing to GitHub). This README is the technical reference.
+> **New to this project?** [GETTING_STARTED.md](GETTING_STARTED.md) is the plain-language, OS-by-OS walkthrough (download → install → first package → API keys → web UI → SIEM → scoring). [COMPLETE_GUIDE.md](COMPLETE_GUIDE.md) is the full explanatory reference, including step-by-step walkthroughs for using the tool to practice. This README is the technical reference.
 
 ## Contents
 
+- [Overview video](#overview-video)
 - [Core design rule](#core-design-rule)
 - [Installation](#installation)
 - [Quickstart](#quickstart)
