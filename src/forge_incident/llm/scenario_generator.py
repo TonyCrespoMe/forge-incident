@@ -302,13 +302,18 @@ def _user_prompt(
     ]
     if category.notes:
         parts.append(f"Notes: {category.notes}")
-    parts.append(f"Suggested MITRE tactics to draw from: {', '.join(category.suggested_tactics) or 'any appropriate'}")
     parts.append(
-        f"Suggested MITRE techniques to draw from (use real, correct IDs — these are "
-        f"hints, not a strict checklist): {', '.join(category.suggested_techniques) or 'any appropriate'}"
+        "Suggested MITRE tactics to draw from: "
+        f"{', '.join(category.suggested_tactics) or 'any appropriate'}"
     )
     parts.append(
-        f"Suggested log_sources for this story: {', '.join(category.primary_log_sources) or 'any appropriate'} "
+        f"Suggested MITRE techniques to draw from (use real, correct IDs — these are "
+        "hints, not a strict checklist): "
+        f"{', '.join(category.suggested_techniques) or 'any appropriate'}"
+    )
+    parts.append(
+        "Suggested log_sources for this story: "
+        f"{', '.join(category.primary_log_sources) or 'any appropriate'} "
         "(combine with others if the story needs it, e.g. an email lure landing on an endpoint)."
     )
     parts.append(f"Difficulty: {difficulty.value} — {_DIFFICULTY_GUIDANCE[difficulty]}")

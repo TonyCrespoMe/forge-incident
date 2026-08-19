@@ -49,7 +49,13 @@ from forge_incident.llm import (
 )
 from forge_incident.models import Difficulty
 from forge_incident.packager import build_packages
-from forge_incident.scenario_categories import CATEGORIES, DOMAINS, categories_in_domain, get_category, get_domain
+from forge_incident.scenario_categories import (
+    CATEGORIES,
+    DOMAINS,
+    categories_in_domain,
+    get_category,
+    get_domain,
+)
 from forge_incident.scenario_loader import ScenarioLoadError, list_scenarios, load_scenario
 from forge_incident.scoring import (
     SubmissionError,
@@ -146,14 +152,19 @@ def generate(
 
 @app.command("generate-nl")
 def generate_nl(
-    prompt: str = typer.Argument(..., help="Natural-language description of the scenario you want."),
+    prompt: str = typer.Argument(
+        ..., help="Natural-language description of the scenario you want."
+    ),
     seed: Optional[int] = typer.Option(
         None, "--seed", help="Seed (default: $FORGE_DEFAULT_SEED, else 1337)."
     ),
     llm: str = typer.Option(
         None,
         "--llm",
-        help=f"Planning backend to use: {', '.join(BACKEND_NAMES)} (default: $FORGE_LLM_BACKEND, else 'none').",
+        help=(
+            f"Planning backend to use: {', '.join(BACKEND_NAMES)} "
+            "(default: $FORGE_LLM_BACKEND, else 'none')."
+        ),
     ),
     difficulty: Optional[Difficulty] = typer.Option(
         None, "--difficulty", help="Force a difficulty instead of letting the backend infer one."
@@ -198,7 +209,9 @@ def generate_nl(
         err_console.print(f"[bold red]Planning failed:[/bold red] {exc}")
         raise typer.Exit(code=1) from None
 
-    console.print(f"[bold]{backend_name}[/bold] chose template [cyan]{plan.scenario_template}[/cyan]")
+    console.print(
+        f"[bold]{backend_name}[/bold] chose template [cyan]{plan.scenario_template}[/cyan]"
+    )
     if plan.rationale:
         console.print(f"  rationale: {plan.rationale}")
 
@@ -227,7 +240,9 @@ def generate_nl(
 @app.command("categories")
 def categories_command(
     domain: Optional[str] = typer.Option(
-        None, "--domain", help="Only show categories in this domain (see domain IDs below with no flag)."
+        None,
+        "--domain",
+        help="Only show categories in this domain (see domain IDs below with no flag).",
     ),
 ) -> None:
     """List the scenario category taxonomy used by `generate-category`.
@@ -282,7 +297,9 @@ def _choose_example_scenario(category, scenarios_dir: Path) -> Path:
 @app.command("generate-category")
 def generate_category(
     category: str = typer.Option(
-        ..., "--category", help="Category ID from `forge-incident categories`, e.g. 'web-a05-injection'."
+        ...,
+        "--category",
+        help="Category ID from `forge-incident categories`, e.g. 'web-a05-injection'.",
     ),
     difficulty: Difficulty = typer.Option(
         Difficulty.INTERMEDIATE, "--difficulty", help="Target difficulty."
@@ -295,14 +312,17 @@ def generate_category(
         "--llm",
         help=(
             "Generation backend (required — full scenario invention needs a real LLM, "
-            f"unlike generate-nl's 'none' option): {', '.join(n for n in BACKEND_NAMES if n != 'none')}."
+            "unlike generate-nl's 'none' option): "
+            f"{', '.join(n for n in BACKEND_NAMES if n != 'none')}."
         ),
     ),
     max_attempts: int = typer.Option(
         DEFAULT_MAX_ATTEMPTS, "--max-attempts", help="Validate/retry attempts before giving up."
     ),
     scenarios_dir: Path = typer.Option(
-        Path("scenarios"), "--scenarios-dir", help="Directory containing the few-shot example scenarios."
+        Path("scenarios"),
+        "--scenarios-dir",
+        help="Directory containing the few-shot example scenarios.",
     ),
     save_dir: Path = typer.Option(
         Path("scenarios/generated"), "--save-dir", help="Where to save the accepted generated YAML."

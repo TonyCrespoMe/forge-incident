@@ -75,7 +75,8 @@ def test_elastic_event_categories_use_the_ecs_controlled_vocabulary():
         "authentication", "iam", "email", "malware", "process", "registry",
         "file", "network", "dns", "configuration", "intrusion_detection",
     }
-    artifacts = export_scenario(load_scenario(SCENARIOS_DIR / "phishing_to_exfil.yaml"), ["elastic"])
+    scenario = load_scenario(SCENARIOS_DIR / "phishing_to_exfil.yaml")
+    artifacts = export_scenario(scenario, ["elastic"])
     for index, line in enumerate(artifacts[0].content.strip().splitlines()):
         if index % 2 == 1:
             for category in json.loads(line)["event"]["category"]:

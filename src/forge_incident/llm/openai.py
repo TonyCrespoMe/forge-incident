@@ -140,7 +140,9 @@ class OpenAILLMBackend(LLMBackend):
             backend_name=self.name,
         )
 
-    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+    def generate_scenario_text(
+        self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096
+    ) -> str:
         try:
             import openai
         except ImportError as exc:
@@ -150,7 +152,9 @@ class OpenAILLMBackend(LLMBackend):
             ) from exc
 
         if not self.api_key:
-            raise LLMBackendError("OPENAI_API_KEY is not set. Add it to your .env (see .env.example).")
+            raise LLMBackendError(
+                "OPENAI_API_KEY is not set. Add it to your .env (see .env.example)."
+            )
 
         client = openai.OpenAI(api_key=self.api_key)
         try:

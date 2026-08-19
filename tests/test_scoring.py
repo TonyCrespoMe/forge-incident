@@ -212,7 +212,8 @@ def test_report_to_dict_is_json_serializable():
 def test_markdown_report_contains_each_section():
     scenario = _mixed_scenario()
     report = score_submission(
-        scenario, Submission(analyst="Ace", detections=[Detection("malware"), Detection("benign-file")])
+        scenario,
+        Submission(analyst="Ace", detections=[Detection("malware"), Detection("benign-file")]),
     )
     markdown = render_report_markdown(report, scenario)
     for heading in (

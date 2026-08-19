@@ -43,7 +43,13 @@ answer_key:
 """
 
 
-def _build(timeline_yaml: str, answer_key_yaml: str = "  - id: q1\n    question: q\n    answer: a\n    related_event_ids: [e1]\n") -> str:
+_DEFAULT_ANSWER_KEY = "  - id: q1\n    question: q\n    answer: a\n    related_event_ids: [e1]\n"
+_TWO_EVENT_ANSWER_KEY = (
+    "  - id: q1\n    question: q\n    answer: a\n    related_event_ids: [e1, e2]\n"
+)
+
+
+def _build(timeline_yaml: str, answer_key_yaml: str = _DEFAULT_ANSWER_KEY) -> str:
     return _BASE_YAML.format(timeline=timeline_yaml, answer_key=answer_key_yaml)
 
 
@@ -103,7 +109,7 @@ def test_filename_with_two_different_hashes_triggers_a_warning():
         "      filename: dump.csv\n"
         f"      sha256: \"{'b' * 64}\"\n"
     )
-    yaml_text = _build(timeline, "  - id: q1\n    question: q\n    answer: a\n    related_event_ids: [e1, e2]\n")
+    yaml_text = _build(timeline, _TWO_EVENT_ANSWER_KEY)
     scenario = load_scenario_from_text(yaml_text, seed=1)
     warnings = check_consistency(scenario)
     assert any("different sha256 hashes" in w for w in warnings)
@@ -135,7 +141,7 @@ def test_same_filename_same_hash_does_not_trigger_a_warning():
         "      filename: dump.csv\n"
         f"      sha256: \"{digest}\"\n"
     )
-    yaml_text = _build(timeline, "  - id: q1\n    question: q\n    answer: a\n    related_event_ids: [e1, e2]\n")
+    yaml_text = _build(timeline, _TWO_EVENT_ANSWER_KEY)
     scenario = load_scenario_from_text(yaml_text, seed=1)
     warnings = check_consistency(scenario)
     assert not any("different sha256 hashes" in w for w in warnings)

@@ -239,7 +239,10 @@ def _instructor_files(
     files = {a.relative_path: a.content for a in artifacts}
     files["README.md"] = _student_readme(scenario, artifacts)
     files["instructor/INSTRUCTOR_GUIDE.md"] = _instructor_guide(
-        scenario, artifacts, llm_generated_by=llm_generated_by, generation_warnings=generation_warnings
+        scenario,
+        artifacts,
+        llm_generated_by=llm_generated_by,
+        generation_warnings=generation_warnings,
     )
     files["instructor/ANSWER_KEY.md"] = _answer_key_markdown(scenario)
     files["instructor/manifest.json"] = json.dumps(
@@ -341,14 +344,18 @@ def _instructor_guide(
 
 def _answer_key_markdown(scenario: Scenario) -> str:
     if not scenario.answer_key:
-        return f"# Answer Key: {scenario.title}\n\n(No answer key items defined for this scenario.)\n"
+        return (
+            f"# Answer Key: {scenario.title}\n\n"
+            "(No answer key items defined for this scenario.)\n"
+        )
 
     lines = [f"# Answer Key: {scenario.title}", ""]
     total_points = sum(item.points for item in scenario.answer_key)
     lines.append(f"Total points: {total_points}")
     lines.append("")
     for item in scenario.answer_key:
-        lines.append(f"## {item.id}. {item.question} ({item.points} pt{'s' if item.points != 1 else ''})")
+        plural = "s" if item.points != 1 else ""
+        lines.append(f"## {item.id}. {item.question} ({item.points} pt{plural})")
         lines.append("")
         lines.append(f"**Answer:** {item.answer.strip()}")
         lines.append("")

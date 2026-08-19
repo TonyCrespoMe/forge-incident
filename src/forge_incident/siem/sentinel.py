@@ -193,7 +193,8 @@ def _starter_kql(scenario: Scenario) -> str:
     Kept intentionally instructor-facing but spoiler-light: these are the
     queries you'd write to START an investigation, not the answer.
     """
-    return f"""// ForgeIncident starter queries — scenario: {scenario.scenario_id} (seed {scenario.seed})
+    header = f"// ForgeIncident starter queries — scenario: {scenario.scenario_id}"
+    return f"""{header} (seed {scenario.seed})
 // Table: {_TABLE_NAME}   (Azure appends type suffixes like _s/_d/_b on ingest;
 // if a column doesn't resolve, check its exact name with: {_TABLE_NAME} | getschema)
 

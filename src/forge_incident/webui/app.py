@@ -332,7 +332,7 @@ with tab_generate:
         last = st.session_state.get("last_result")
         if last:
             c1, c2 = st.columns(2)
-            for column, (label, path_str) in zip((c1, c2), last.items()):
+            for column, (label, path_str) in zip((c1, c2), last.items(), strict=False):
                 path = Path(path_str)
                 if path.is_file():
                     column.download_button(

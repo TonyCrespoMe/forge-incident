@@ -113,7 +113,9 @@ class LLMBackend(ABC):
     ) -> ScenarioPlan:
         """Turn a natural-language prompt into a structured ScenarioPlan."""
 
-    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+    def generate_scenario_text(
+        self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096
+    ) -> str:
         """Raw text completion for full brand-new-scenario YAML generation.
 
         Unlike `plan_scenario` (a small, narrowly-typed choice among

@@ -141,7 +141,9 @@ def test_aws_cloudtrail_emitter_produces_valid_jsonl():
 
     from forge_incident.scenario_loader import load_scenario_from_text
 
-    scenario = load_scenario_from_text(_CLOUD_YAML_TEMPLATE.format(log_source="aws_cloudtrail"), seed=5)
+    scenario = load_scenario_from_text(
+        _CLOUD_YAML_TEMPLATE.format(log_source="aws_cloudtrail"), seed=5
+    )
     artifacts = run_all(scenario)
     assert len(artifacts) == 1
     assert artifacts[0].relative_path.startswith("logs/aws_cloudtrail/")
@@ -156,7 +158,9 @@ def test_azure_activity_emitter_produces_valid_jsonl():
 
     from forge_incident.scenario_loader import load_scenario_from_text
 
-    scenario = load_scenario_from_text(_CLOUD_YAML_TEMPLATE.format(log_source="azure_activity"), seed=5)
+    scenario = load_scenario_from_text(
+        _CLOUD_YAML_TEMPLATE.format(log_source="azure_activity"), seed=5
+    )
     artifacts = run_all(scenario)
     assert len(artifacts) == 1
     assert artifacts[0].relative_path.startswith("logs/azure_activity/")

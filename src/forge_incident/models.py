@@ -362,7 +362,11 @@ class CloudApiCall(ForgeBaseModel):
     """
 
     method_name: str = Field(
-        ..., description="e.g. 'google.iam.admin.v1.CreateServiceAccountKey', 'ConsoleLogin', 'Microsoft.Storage/...'"
+        ...,
+        description=(
+            "e.g. 'google.iam.admin.v1.CreateServiceAccountKey', 'ConsoleLogin', "
+            "'Microsoft.Storage/...'"
+        ),
     )
     service_name: str = Field(..., description="e.g. 'iam.googleapis.com', 'iam.amazonaws.com'")
     resource_name: str

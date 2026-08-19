@@ -150,7 +150,9 @@ class OllamaLLMBackend(LLMBackend):
             backend_name=self.name,
         )
 
-    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+    def generate_scenario_text(
+        self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096
+    ) -> str:
         try:
             import httpx
         except ImportError as exc:

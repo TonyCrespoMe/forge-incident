@@ -197,7 +197,9 @@ class ElasticExporter(SiemExporter):
                     "tactic": {"name": event.mitre.tactic},
                 }
 
-            lines.append(json.dumps({"index": {"_index": index, "_id": doc_id}}, separators=(",", ":")))
+            lines.append(
+                json.dumps({"index": {"_index": index, "_id": doc_id}}, separators=(",", ":"))
+            )
             lines.append(json.dumps(_prune(doc), separators=(",", ":")))
 
         content = "\n".join(lines) + "\n"

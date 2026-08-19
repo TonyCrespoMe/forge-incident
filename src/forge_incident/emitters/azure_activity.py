@@ -15,7 +15,12 @@ from __future__ import annotations
 
 import json
 
-from forge_incident.emitters.base import EmittedArtifact, Emitter, iso8601_z_timestamp, stable_hex_id
+from forge_incident.emitters.base import (
+    EmittedArtifact,
+    Emitter,
+    iso8601_z_timestamp,
+    stable_hex_id,
+)
 from forge_incident.models import LogSource, Scenario
 
 __all__ = ["AzureActivityEmitter"]
@@ -29,7 +34,9 @@ class AzureActivityEmitter(Emitter):
         if not events:
             return []
 
-        subscription_id = scenario.organization.gcp_project_id or "00000000-0000-0000-0000-000000000000"
+        subscription_id = (
+            scenario.organization.gcp_project_id or "00000000-0000-0000-0000-000000000000"
+        )
         lines: list[str] = []
 
         for event in events:
@@ -39,13 +46,17 @@ class AzureActivityEmitter(Emitter):
 
             record = {
                 "time": iso8601_z_timestamp(event.timestamp),
-                "operationId": stable_hex_id(event.event_id, "azure_activity", "operationId", length=36),
+                "operationId": stable_hex_id(
+                    event.event_id, "azure_activity", "operationId", length=36
+                ),
                 "operationName": cloud.method_name,
                 "category": cloud.service_name,
                 "resultType": "Success" if cloud.status_code == "OK" else cloud.status_code,
                 "resultSignature": cloud.status_code,
                 "callerIpAddress": cloud.caller_ip,
-                "correlationId": stable_hex_id(event.event_id, "azure_activity", "correlationId", length=36),
+                "correlationId": stable_hex_id(
+                    event.event_id, "azure_activity", "correlationId", length=36
+                ),
                 "identity": {
                     "claims": {"upn": principal},
                     "authorization": {"scope": cloud.resource_name},

@@ -12,7 +12,13 @@ import os
 
 import pytest
 
-from forge_incident.llm import BACKEND_NAMES, LLMBackendError, available_templates, build_scenario_from_plan, get_backend
+from forge_incident.llm import (
+    BACKEND_NAMES,
+    LLMBackendError,
+    available_templates,
+    build_scenario_from_plan,
+    get_backend,
+)
 from forge_incident.models import Difficulty
 from tests.conftest import SCENARIOS_DIR
 
@@ -137,7 +143,13 @@ def test_api_key_backends_report_unavailable_without_a_key():
     from forge_incident.llm.grok import GrokLLMBackend
     from forge_incident.llm.openai import OpenAILLMBackend
 
-    keys_to_clear = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "GROK_API_KEY"]
+    keys_to_clear = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "XAI_API_KEY",
+        "GROK_API_KEY",
+    ]
     saved = {k: os.environ.pop(k, None) for k in keys_to_clear}
     try:
         assert ClaudeLLMBackend(api_key=None).is_available() is False
@@ -170,8 +182,16 @@ def test_api_key_backends_override_generate_scenario_text():
     from forge_incident.llm.ollama import OllamaLLMBackend
     from forge_incident.llm.openai import OpenAILLMBackend
 
-    for cls in (ClaudeLLMBackend, OpenAILLMBackend, GeminiLLMBackend, GrokLLMBackend, OllamaLLMBackend):
-        assert "generate_scenario_text" in cls.__dict__, f"{cls.__name__} must override generate_scenario_text"
+    for cls in (
+        ClaudeLLMBackend,
+        OpenAILLMBackend,
+        GeminiLLMBackend,
+        GrokLLMBackend,
+        OllamaLLMBackend,
+    ):
+        assert "generate_scenario_text" in cls.__dict__, (
+            f"{cls.__name__} must override generate_scenario_text"
+        )
 
 
 def test_grok_backend_reads_either_xai_or_grok_api_key_env_var():

@@ -441,7 +441,8 @@ def render_report_markdown(report: ScoreReport, scenario: Scenario) -> str:
         f"({report.detected_count}/{report.total_opportunities} opportunities) |",
         f"| Precision | **{report.precision_pct:.0f}%** "
         f"({report.false_positive_count + report.unknown_event_id_count} false positive(s)) |",
-        f"| Time to first detection | **{_format_duration(report.time_to_first_detection_seconds)}** |",
+        "| Time to first detection | "
+        f"**{_format_duration(report.time_to_first_detection_seconds)}** |",
         f"| Mean detection latency | {_format_duration(report.mean_latency_seconds)} |",
         f"| Median detection latency | {_format_duration(report.median_latency_seconds)} |",
         "",
@@ -517,7 +518,12 @@ def render_report_markdown(report: ScoreReport, scenario: Scenario) -> str:
         answer_key = {item.id: item for item in scenario.answer_key}
         for qid, response in report.answers.items():
             question = answer_key[qid].question if qid in answer_key else "(unknown question id)"
-            lines += [f"### {qid} — {question}", "", f"**Student answered:** {response or '(blank)'}", ""]
+            lines += [
+                f"### {qid} — {question}",
+                "",
+                f"**Student answered:** {response or '(blank)'}",
+                "",
+            ]
 
     lines.append("")
     return "\n".join(lines)

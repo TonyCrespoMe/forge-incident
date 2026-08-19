@@ -115,7 +115,8 @@ class LinuxEmitter(Emitter):
                 )
             )
             lines.append(
-                f"{syslog_timestamp(attempt_ts)} {hostname} sshd[{attempt_pid}]: Failed password for "
+                f"{syslog_timestamp(attempt_ts)} {hostname} "
+                f"sshd[{attempt_pid}]: Failed password for "
                 f"{username} from {source_ip} port {port} ssh2"
             )
         if int(event.extra.get("attempt_count", 1)) > _MAX_RENDERED_ATTEMPTS:

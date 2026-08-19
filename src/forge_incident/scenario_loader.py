@@ -239,7 +239,9 @@ def _format_pydantic_error(exc: ValidationError) -> str:
     return "\n".join(lines)
 
 
-def _build_scenario(raw: dict[str, Any], *, scenario_id: str, seed_override: int | None) -> Scenario:
+def _build_scenario(
+    raw: dict[str, Any], *, scenario_id: str, seed_override: int | None
+) -> Scenario:
     effective_seed = seed_override if seed_override is not None else raw.get("seed")
     if effective_seed is None:
         raise ScenarioLoadError(

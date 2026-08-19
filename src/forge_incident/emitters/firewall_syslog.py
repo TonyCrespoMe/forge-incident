@@ -74,7 +74,8 @@ class FirewallSyslogEmitter(Emitter):
             return []
 
         device_name = f"FW-{slugify(scenario.organization.name, max_length=12).upper()}"
-        device_id = f"FGT{stable_int_id(scenario.scenario_id, 'fw', 'serial', low=10**9, high=10**10 - 1)}"
+        serial = stable_int_id(scenario.scenario_id, "fw", "serial", low=10**9, high=10**10 - 1)
+        device_id = f"FGT{serial}"
 
         lines: list[str] = []
         for event in events:
@@ -99,10 +100,12 @@ class FirewallSyslogEmitter(Emitter):
                 f"dstip={net.dst_ip}",
                 f"dstport={net.dst_port}",
                 f"dstintf={_quote(_interface_for(net.dst_ip))}",
-                f"sessionid={stable_int_id(event.event_id, 'fw', 'session', low=1, high=9_999_999)}",
+                "sessionid="
+                f"{stable_int_id(event.event_id, 'fw', 'session', low=1, high=9_999_999)}",
                 f"proto={_PROTOCOL_NUMBER.get(net.protocol.value, 0)}",
                 f"action={_ACTION_MAP[net.action]}",
-                f"policyid={stable_int_id(net.rule_name or 'default', 'fw', 'policy', low=1, high=99)}",
+                "policyid="
+                f"{stable_int_id(net.rule_name or 'default', 'fw', 'policy', low=1, high=99)}",
                 f"policyname={_quote(net.rule_name or 'default')}",
                 f"service={_quote((net.app or 'unknown').upper())}",
                 f"appcat={_quote('unscanned')}",

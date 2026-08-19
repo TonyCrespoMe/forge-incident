@@ -14,11 +14,11 @@ from forge_incident.llm.base import LLMBackend, LLMBackendError
 from forge_incident.llm.none import NoneLLMBackend
 from forge_incident.llm.scenario_generator import (
     DEFAULT_MAX_ATTEMPTS,
-    generate_new_scenario,
     _extract_yaml,
     _make_scenario_id,
     _system_prompt,
     _user_prompt,
+    generate_new_scenario,
 )
 from forge_incident.models import Difficulty
 from forge_incident.scenario_categories import get_category
@@ -135,7 +135,9 @@ class _StubBackend(LLMBackend):
     def plan_scenario(self, *args, **kwargs):
         raise NotImplementedError("not used by these tests")
 
-    def generate_scenario_text(self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+    def generate_scenario_text(
+        self, *, system_prompt: str, user_prompt: str, max_tokens: int = 4096
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls - 1, len(self._responses) - 1)]
 

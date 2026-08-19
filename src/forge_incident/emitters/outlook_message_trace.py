@@ -13,7 +13,12 @@ from __future__ import annotations
 import csv
 import io
 
-from forge_incident.emitters.base import EmittedArtifact, Emitter, message_trace_timestamp, stable_hex_id
+from forge_incident.emitters.base import (
+    EmittedArtifact,
+    Emitter,
+    message_trace_timestamp,
+    stable_hex_id,
+)
 from forge_incident.models import EmailDirection, LogSource, Scenario
 
 __all__ = ["OutlookMessageTraceEmitter"]

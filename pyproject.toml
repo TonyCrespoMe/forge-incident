@@ -84,6 +84,21 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.flake8-bugbear]
+# Typer's entire API is built on function-call defaults --
+# `def cmd(x: int = typer.Option(...))` is the documented, required idiom, not
+# the mutable-default bug B008 exists to catch. Without this, every CLI command
+# signature is a false positive.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
+[tool.ruff.lint.per-file-ignores]
+# These two modules are lookup TABLES, not prose: one entry per line is the
+# whole point, and wrapping each entry across three lines would turn a
+# scannable table into something much harder to read and diff. Line length is
+# enforced everywhere else.
+"src/forge_incident/emitters/windows.py" = ["E501"]   # EventType -> Windows Event ID mapping
+"src/forge_incident/scenario_categories.py" = ["E501"]  # the 56-category taxonomy
+
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true

@@ -17,7 +17,12 @@ from __future__ import annotations
 
 import json
 
-from forge_incident.emitters.base import EmittedArtifact, Emitter, iso8601_z_timestamp, stable_hex_id
+from forge_incident.emitters.base import (
+    EmittedArtifact,
+    Emitter,
+    iso8601_z_timestamp,
+    stable_hex_id,
+)
 from forge_incident.models import LogSource, Scenario
 
 __all__ = ["AwsCloudTrailEmitter"]
@@ -50,7 +55,9 @@ class AwsCloudTrailEmitter(Emitter):
                 "userAgent": cloud.user_agent or "aws-cli/2.15.0",
                 "userIdentity": {
                     "type": "IAMUser",
-                    "principalId": stable_hex_id(principal, "aws", "principalId", length=21).upper(),
+                    "principalId": stable_hex_id(
+                        principal, "aws", "principalId", length=21
+                    ).upper(),
                     "arn": f"arn:aws:iam::{account_id}:user/{principal}",
                     "accountId": account_id,
                     "userName": principal,

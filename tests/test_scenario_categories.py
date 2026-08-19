@@ -33,7 +33,9 @@ def test_every_domain_has_at_least_one_category():
 def test_every_category_references_a_known_domain():
     known = set(domain_ids())
     for category in CATEGORIES:
-        assert category.domain in known, f"{category.id} references unknown domain {category.domain!r}"
+        assert category.domain in known, (
+            f"{category.id} references unknown domain {category.domain!r}"
+        )
 
 
 def test_every_category_has_required_text_fields():
@@ -41,7 +43,9 @@ def test_every_category_has_required_text_fields():
         assert category.name.strip()
         assert category.summary.strip()
         assert category.source.strip()
-        assert len(category.summary) > 40, f"{category.id} summary looks too thin to prompt an LLM well"
+        assert len(category.summary) > 40, (
+            f"{category.id} summary looks too thin to prompt an LLM well"
+        )
 
 
 def test_get_category_round_trips():

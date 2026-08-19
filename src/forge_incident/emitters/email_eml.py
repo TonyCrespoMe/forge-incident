@@ -18,7 +18,13 @@ from __future__ import annotations
 import base64
 import mimetypes
 
-from forge_incident.emitters.base import EmittedArtifact, Emitter, rfc5322_timestamp, slugify, stable_hex_id
+from forge_incident.emitters.base import (
+    EmittedArtifact,
+    Emitter,
+    rfc5322_timestamp,
+    slugify,
+    stable_hex_id,
+)
 from forge_incident.models import EmailArtifact, LogSource, Scenario
 
 __all__ = ["EmailEmitter"]
@@ -47,7 +53,8 @@ class EmailEmitter(Emitter):
 
             received = (
                 f"Received: from {_source_host(email.client_ip)} ({email.client_ip or 'unknown'})\n"
-                f"        by mail.{org_domain} with ESMTPS id {stable_hex_id(event.event_id, 'received', length=12)};\n"
+                f"        by mail.{org_domain} with ESMTPS id "
+                f"{stable_hex_id(event.event_id, 'received', length=12)};\n"
                 f"        {date_header}"
             )
 
@@ -71,13 +78,16 @@ class EmailEmitter(Emitter):
                 body = "\n" + (email.body_text or "").strip() + "\n"
 
             content = "\n".join(headers) + "\n" + body
-            filename = f"{slugify(email.subject)}-{stable_hex_id(event.event_id, 'filename', length=8)}.eml"
+            suffix = stable_hex_id(event.event_id, "filename", length=8)
+            filename = f"{slugify(email.subject)}-{suffix}.eml"
 
             artifacts.append(
                 EmittedArtifact(
                     relative_path=f"logs/email_eml/{filename}",
                     content=content,
-                    description=f"Recovered email: {email.subject!r} ({email.sender} -> {recipients})",
+                    description=(
+                        f"Recovered email: {email.subject!r} ({email.sender} -> {recipients})"
+                    ),
                 )
             )
 
@@ -110,7 +120,9 @@ def _multipart_body(email: EmailArtifact, boundary: str) -> str:
     encoded = base64.b64encode(placeholder_note.encode("utf-8")).decode("ascii")
     encoded_lines = "\n".join(encoded[i : i + 76] for i in range(0, len(encoded), 76))
 
-    content_type = mimetypes.guess_type(email.attachment_name or "")[0] or "application/octet-stream"
+    content_type = (
+        mimetypes.guess_type(email.attachment_name or "")[0] or "application/octet-stream"
+    )
 
     attachment_part = (
         f"--{boundary}\n"
