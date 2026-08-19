@@ -95,7 +95,7 @@ def derive_rng(seed: int, *parts: str) -> random.Random:
 
     Example: `derive_rng(scenario.seed, "linux", "auth_noise")`
     """
-    digest = hashlib.sha256(f"{seed}:{'|'.join(parts)}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{seed}:{'|'.join(parts)}".encode()).hexdigest()
     return random.Random(int(digest[:16], 16))
 
 

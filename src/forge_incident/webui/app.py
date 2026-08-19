@@ -478,7 +478,7 @@ with tab_plugins:
     st.dataframe(
         [
             {
-                "Log source": getattr(e, "log_source").value,
+                "Log source": e.log_source.value,
                 "Class": type(e).__name__,
             }
             for e in BUILTIN_EMITTERS

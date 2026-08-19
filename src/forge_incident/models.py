@@ -330,7 +330,7 @@ class EmailArtifact(ForgeBaseModel):
         return v
 
     @model_validator(mode="after")
-    def _attachment_consistency(self) -> "EmailArtifact":
+    def _attachment_consistency(self) -> EmailArtifact:
         if self.has_attachment and not self.attachment_name:
             raise ValueError("has_attachment=True requires attachment_name to be set")
         return self
@@ -508,7 +508,7 @@ class Scenario(ForgeBaseModel):
     # -- Cross-field validation -------------------------------------------------
 
     @model_validator(mode="after")
-    def _validate_references(self) -> "Scenario":
+    def _validate_references(self) -> Scenario:
         actor_keys = set(self.actors)
         host_keys = set(self.hosts)
         event_ids = set()

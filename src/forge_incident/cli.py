@@ -30,7 +30,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -64,6 +63,11 @@ from forge_incident.scoring import (
     score_submission,
 )
 from forge_incident.siem import EXPORTER_NAMES, UnknownExporterError, export_scenario
+
+# Pre-joined here rather than inline in the --format help string: a call inside a
+# default-argument expression is evaluated at import time anyway, and hoisting it
+# keeps that explicit (ruff B008).
+_EXPORTER_CHOICES = ", ".join(EXPORTER_NAMES)
 
 app = typer.Typer(
     name="forge-incident",
@@ -116,7 +120,7 @@ def version() -> None:
 @app.command()
 def generate(
     scenario_file: Path = typer.Argument(..., help="Path to a scenario YAML file."),
-    seed: Optional[int] = typer.Option(
+    seed: int | None = typer.Option(
         None, "--seed", help="Override the seed declared in the scenario file."
     ),
     output: Path = typer.Option(
@@ -155,7 +159,7 @@ def generate_nl(
     prompt: str = typer.Argument(
         ..., help="Natural-language description of the scenario you want."
     ),
-    seed: Optional[int] = typer.Option(
+    seed: int | None = typer.Option(
         None, "--seed", help="Seed (default: $FORGE_DEFAULT_SEED, else 1337)."
     ),
     llm: str = typer.Option(
@@ -166,7 +170,7 @@ def generate_nl(
             "(default: $FORGE_LLM_BACKEND, else 'none')."
         ),
     ),
-    difficulty: Optional[Difficulty] = typer.Option(
+    difficulty: Difficulty | None = typer.Option(
         None, "--difficulty", help="Force a difficulty instead of letting the backend infer one."
     ),
     scenarios_dir: Path = typer.Option(
@@ -239,7 +243,7 @@ def generate_nl(
 
 @app.command("categories")
 def categories_command(
-    domain: Optional[str] = typer.Option(
+    domain: str | None = typer.Option(
         None,
         "--domain",
         help="Only show categories in this domain (see domain IDs below with no flag).",
@@ -304,7 +308,7 @@ def generate_category(
     difficulty: Difficulty = typer.Option(
         Difficulty.INTERMEDIATE, "--difficulty", help="Target difficulty."
     ),
-    seed: Optional[int] = typer.Option(
+    seed: int | None = typer.Option(
         None, "--seed", help="Seed (default: $FORGE_DEFAULT_SEED, else 1337)."
     ),
     llm: str = typer.Option(
@@ -478,16 +482,16 @@ def list_command(
 @app.command("export")
 def export_command(
     scenario_file: Path = typer.Argument(..., help="Path to a scenario YAML file."),
-    formats: Optional[list[str]] = typer.Option(
+    formats: list[str] | None = typer.Option(
         None,
         "--format",
         "-f",
         help=(
-            f"SIEM format(s) to export; repeatable. Choices: {', '.join(EXPORTER_NAMES)}. "
+            f"SIEM format(s) to export; repeatable. Choices: {_EXPORTER_CHOICES}. "
             "Default: all of them."
         ),
     ),
-    seed: Optional[int] = typer.Option(
+    seed: int | None = typer.Option(
         None, "--seed", help="Override the seed declared in the scenario file."
     ),
     output: Path = typer.Option(
@@ -537,7 +541,7 @@ def export_command(
 def score_command(
     scenario_file: Path = typer.Argument(..., help="The scenario YAML the student worked."),
     submission_file: Path = typer.Argument(..., help="The student's completed submission.json."),
-    seed: Optional[int] = typer.Option(
+    seed: int | None = typer.Option(
         None,
         "--seed",
         help=(
@@ -545,7 +549,7 @@ def score_command(
             "timestamps (and therefore response-time scoring) won't line up."
         ),
     ),
-    output: Optional[Path] = typer.Option(
+    output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
@@ -634,7 +638,7 @@ def slugify_name(value: str) -> str:
 
 @app.command("plugins")
 def plugins_command(
-    plugins_dir: Optional[Path] = typer.Option(
+    plugins_dir: Path | None = typer.Option(
         None,
         "--plugins-dir",
         help="Directory of plugin .py files (default: $FORGE_PLUGINS_DIR, else ./plugins).",

@@ -37,10 +37,11 @@ from __future__ import annotations
 
 import json
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from forge_incident.models import Event, Scenario, Severity
 
