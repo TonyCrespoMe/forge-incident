@@ -54,6 +54,7 @@ _LOG_SOURCE_BLURBS = {
     "azure_activity": "Azure Activity Log / Entra ID audit log export (JSON Lines)",
     "okta": "Okta System Log export (JSON Lines)",
     "crowdstrike": "CrowdStrike Falcon detection export (JSON Lines)",
+    "iis": "Microsoft IIS W3C extended access log",
     "firewall_syslog": "Firewall traffic syslog, key=value format",
     "outlook_message_trace": "Exchange Online Message Trace export (CSV)",
     "palo_alto": "Palo Alto Networks (PAN-OS) traffic log export (CSV)",

@@ -14,7 +14,11 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS_DIR = REPO_ROOT / "scenarios"
 
-BUNDLED_SCENARIO_FILENAMES = ["phishing_to_exfil.yaml", "gcp_key_compromise.yaml"]
+BUNDLED_SCENARIO_FILENAMES = [
+    "phishing_to_exfil.yaml",
+    "gcp_key_compromise.yaml",
+    "webshell_to_dc_compromise.yaml",
+]
 
 
 @pytest.fixture(params=BUNDLED_SCENARIO_FILENAMES)

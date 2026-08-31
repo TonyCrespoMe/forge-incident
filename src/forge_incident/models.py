@@ -127,6 +127,7 @@ class LogSource(str, Enum):
     AZURE_ACTIVITY = "azure_activity"
     OKTA = "okta"
     CROWDSTRIKE = "crowdstrike"
+    IIS = "iis"
     OUTLOOK_MESSAGE_TRACE = "outlook_message_trace"
     PALO_ALTO = "palo_alto"
     FIREWALL_SYSLOG = "firewall_syslog"
@@ -166,6 +167,14 @@ class EventType(str, Enum):
     FILE_CREATED = "file_created"
     FILE_MODIFIED = "file_modified"
     FILE_DELETED = "file_deleted"
+
+    # --- Web / application ---
+    WEB_REQUEST = "web_request"
+    WEB_SHELL_UPLOAD = "web_shell_upload"
+    WEB_SHELL_COMMAND = "web_shell_command"
+
+    # --- Service / execution ---
+    SERVICE_INSTALLED = "service_installed"
 
     # --- Network ---
     DNS_QUERY = "dns_query"
@@ -336,6 +345,60 @@ class EmailArtifact(ForgeBaseModel):
         return self
 
 
+class HttpRequest(ForgeBaseModel):
+    """One HTTP request/response pair — feeds the `iis` emitter.
+
+    Deliberately models the *server's* view (what a web-server access log
+    records), not the client's: there is no request body field, because a
+    real IIS log does not capture POST bodies. That absence is a teaching
+    feature, not an oversight — a scenario can route a web-shell command
+    through a POST and the command will be genuinely invisible in the web
+    log, forcing students to prove it happened from a downstream host's
+    telemetry instead. See `cmd_base64` below for the GET-borne variant.
+    """
+
+    method: str = Field(default="GET", description="HTTP verb, e.g. 'GET', 'POST', 'HEAD'")
+    uri_stem: str = Field(..., description="Path without query string, e.g. '/upload.aspx'")
+    uri_query: str | None = Field(
+        default=None, description="Query string WITHOUT the leading '?', or None if absent"
+    )
+    status_code: int = Field(default=200, ge=100, le=599)
+    substatus: int = Field(default=0, ge=0)
+    win32_status: int = Field(default=0, ge=0)
+    user_agent: str | None = None
+    referer: str | None = None
+    server_ip: str | None = None
+    server_port: int = Field(default=80, ge=1, le=65535)
+    username: str | None = Field(
+        default=None, description="cs-username; '-' for anonymous, which is the common case"
+    )
+    time_taken_ms: int | None = Field(default=None, ge=0)
+    bytes_sent: int | None = Field(default=None, ge=0)
+    #: Convenience for web-shell scenarios: the plaintext command an
+    #: attacker smuggled through a query parameter. The emitter base64-
+    #: encodes it into `uri_query` so students must decode it themselves,
+    #: which is exactly how real web shells of this class are operated.
+    cmd_plaintext: str | None = None
+    cmd_param: str = Field(default="cmd", description="Query parameter name carrying the command")
+
+
+class ServiceInstall(ForgeBaseModel):
+    """A Windows service installation — feeds Security/System EID 7045.
+
+    This is the signature left behind by PsExec-style remote execution
+    (Invoke-SMBExec, Impacket's smbexec, and friends): each remote command
+    becomes a short-lived service whose ImagePath is the command itself,
+    typically with a randomly-generated name. Modeling it explicitly means
+    a scenario can teach that pattern rather than hand-waving it.
+    """
+
+    service_name: str = Field(..., description="e.g. 'XFBRJVUPQBBNMSAPIGNN'")
+    image_path: str = Field(..., description="ImagePath, e.g. '%COMSPEC% /C \"whoami\"'")
+    service_type: str = "user mode service"
+    start_type: str = "demand start"
+    account: str = "LocalSystem"
+
+
 class NetworkInfo(ForgeBaseModel):
     """Feeds the palo_alto (and optionally linux/windows firewall) emitters."""
 
@@ -424,6 +487,8 @@ class Event(ForgeBaseModel):
     network: NetworkInfo | None = None
     cloud: CloudApiCall | None = None
     file: FileInfo | None = None
+    http: HttpRequest | None = None
+    service: ServiceInstall | None = None
 
     tags: list[str] = Field(default_factory=list)
     extra: dict[str, Any] = Field(

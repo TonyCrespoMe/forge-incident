@@ -78,3 +78,8 @@ Thumbs.db
 
 # --- Jupyter ---
 .ipynb_checkpoints/
+
+# --- Agent tooling and local score reports ---
+.agents/
+.claude/
+reports/

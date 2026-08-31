@@ -20,6 +20,7 @@ from forge_incident.emitters.crowdstrike import CrowdStrikeEmitter
 from forge_incident.emitters.email_eml import EmailEmitter
 from forge_incident.emitters.firewall_syslog import FirewallSyslogEmitter
 from forge_incident.emitters.gcp_audit import GcpAuditEmitter
+from forge_incident.emitters.iis import IisEmitter
 from forge_incident.emitters.linux import LinuxEmitter
 from forge_incident.emitters.okta import OktaEmitter
 from forge_incident.emitters.outlook_message_trace import OutlookMessageTraceEmitter
@@ -42,6 +43,7 @@ __all__ = [
     "AzureActivityEmitter",
     "OktaEmitter",
     "CrowdStrikeEmitter",
+    "IisEmitter",
     "OutlookMessageTraceEmitter",
     "PaloAltoEmitter",
     "FirewallSyslogEmitter",
@@ -64,6 +66,7 @@ BUILTIN_EMITTERS: tuple[Emitter, ...] = (
     AzureActivityEmitter(),
     OktaEmitter(),
     CrowdStrikeEmitter(),
+    IisEmitter(),
     OutlookMessageTraceEmitter(),
     PaloAltoEmitter(),
     FirewallSyslogEmitter(),

