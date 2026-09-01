@@ -29,6 +29,7 @@ _EXPECTED_EVENT_COUNT_RANGE: dict[Difficulty, tuple[int, int]] = {
     Difficulty.BEGINNER: (6, 16),
     Difficulty.INTERMEDIATE: (12, 28),
     Difficulty.ADVANCED: (20, 45),
+    Difficulty.EXPERT: (30, 70),
 }
 
 

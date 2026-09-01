@@ -52,6 +52,17 @@ _DIFFICULTY_GUIDANCE: dict[Difficulty, str] = {
         "element (e.g. a log-clearing event, a time gap, an anti-forensics step). "
         "Requires multi-step correlation across most/all provided logs."
     ),
+    Difficulty.EXPERT: (
+        "35-60 timeline events across four or more hosts/actors and at least four "
+        "different log_sources, spanning a multi-day dwell time. MUST include at "
+        "least one deliberate VISIBILITY GAP: an action whose effect is visible on "
+        "one host but whose cause is absent from the log that would normally record "
+        "it (e.g. a command delivered by HTTP POST, which web servers do not log in "
+        "the request body). Also include at least one misleading artifact -- benign "
+        "activity that superficially resembles the attack. The correct answer must "
+        "therefore include stating what CANNOT be proven from the evidence, so write "
+        "an answer_key question that explicitly grades that."
+    ),
 }
 
 # Rough output-token budgets per difficulty, sized from the bundled example
@@ -64,6 +75,7 @@ _MAX_OUTPUT_TOKENS: dict[Difficulty, int] = {
     Difficulty.BEGINNER: 4096,
     Difficulty.INTERMEDIATE: 6144,
     Difficulty.ADVANCED: 9216,
+    Difficulty.EXPERT: 14336,
 }
 
 _KNOWN_EVENT_TYPES = (

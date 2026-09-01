@@ -68,9 +68,26 @@ class Severity(str, Enum):
 
 
 class Difficulty(str, Enum):
+    """How demanding an exercise is.
+
+    The tiers describe *analytical* load, not just event count: what a
+    student has to hold in their head at once, and how much the evidence
+    resists a naive reading.
+
+    - beginner:     one clear thread, one or two hosts, no red herrings
+    - intermediate: several hosts, at least one benign event to rule out,
+                    requires cross-referencing two or more log sources
+    - advanced:     multi-stage chain, defense evasion, and evidence that
+                    must be assembled rather than read
+    - expert:       everything above plus at least one deliberate
+                    visibility gap or misleading artifact, so the correct
+                    answer includes stating what CANNOT be proven
+    """
+
     BEGINNER = "beginner"
     INTERMEDIATE = "intermediate"
     ADVANCED = "advanced"
+    EXPERT = "expert"
 
 
 class HostType(str, Enum):

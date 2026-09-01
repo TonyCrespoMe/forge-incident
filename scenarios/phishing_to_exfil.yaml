@@ -125,6 +125,69 @@ hosts:
     mac_address: "00:1A:2B:9F:11:02"
 
 timeline:
+  # ---- Benign baseline --------------------------------------------------
+  # Added so this scenario can exercise false-positive scoring. Without at
+  # least some legitimate activity, an analyst who flags every event scores
+  # perfect coverage, and the exercise quietly teaches that anything
+  # unusual is an attack. See SCENARIO_CURRICULUM.md.
+  - id: morning-login
+    at: "-14m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: info
+    actor: victim
+    host: ws-01
+    description: >
+      BENIGN. Jane's ordinary interactive logon at the start of the working
+      day, from her assigned workstation. Baseline for what normal looks
+      like on this host.
+    process:
+      pid: 988
+      ppid: 704
+      name: winlogon.exe
+      command_line: "winlogon.exe"
+      parent_name: services.exe
+
+  - id: routine-mail
+    at: "-6m"
+    event_type: email_sent
+    log_sources: [outlook_message_trace]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. A routine internal message about a supplier query — ordinary
+      correspondence, sent minutes before the phishing email arrives.
+      Students who flag every message in the trace will lose precision here.
+    email:
+      message_id: "<2b6f14ac-91d3-4e07-8a55-c7e2f0b48d19@globex.example>"
+      sender: jsmith@globex.example
+      recipients: [tokafor@globex.example]
+      subject: "RE: Supplier query - Ashland castings lead time"
+      direction: internal
+      spf: pass
+      dkim: pass
+      dmarc: pass
+      has_attachment: false
+
+  - id: routine-fileshare
+    at: "+1h48m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: info
+    actor: victim
+    host: fs-01
+    description: >
+      BENIGN, and deliberately placed mid-intrusion. Jane saves a legitimate
+      work document to the file server while the compromise is already
+      underway. It is on the same host the attacker later stages data from,
+      so an analyst who assumes all FS-01 activity is malicious will flag
+      it. Not every action by a compromised user is the attacker's.
+    file:
+      path: \\FS-01\Finance\Reports\ashland-castings-q1-summary.xlsx
+      filename: ashland-castings-q1-summary.xlsx
+      size_bytes: 187392
+
+  # ---- The intrusion ----------------------------------------------------
   - id: delivered
     at: "+0m"
     event_type: phishing_email_delivered

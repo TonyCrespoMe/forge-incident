@@ -15,7 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS_DIR = REPO_ROOT / "scenarios"
 
 BUNDLED_SCENARIO_FILENAMES = [
+    "phishing_credential_harvest.yaml",
     "phishing_to_exfil.yaml",
+    "insider_usb_exfiltration.yaml",
     "gcp_key_compromise.yaml",
     "webshell_to_dc_compromise.yaml",
 ]

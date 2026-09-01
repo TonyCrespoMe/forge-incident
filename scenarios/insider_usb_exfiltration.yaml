@@ -1,0 +1,592 @@
+# ForgeIncident scenario file
+# =============================================================================
+# INTERMEDIATE TIER (curriculum I2). The insider-threat scenario, and the
+# only bundled scenario where the subject NEVER does anything they lack
+# permission to do.
+#
+# Why that matters pedagogically: every other scenario in this project has a
+# bright line — a web shell, a stolen hash, a foreign login. Here there is
+# no such line. Every file the subject opens is a file he is authorized to
+# open. Every tool he uses is approved. The malice lives entirely in the
+# PATTERN: volume, timing relative to his resignation, selection of the
+# company's most commercially sensitive material, and the destination.
+#
+# This trains a genuinely different skill: building a behavioural case from
+# authorized activity, and being appropriately careful about it. An analyst
+# who cries "attack!" at the first file copy is wrong; so is one who says
+# "authorized, nothing to see". The right answer is evidence-led and hedged.
+#
+# The scenario is heavily loaded with BENIGN events on purpose (roughly a
+# third of the timeline). Insider cases are the hardest place to control
+# false positives, so the scoring system's precision metric matters more
+# here than anywhere else in the catalog.
+#
+# HR context (resignation date) is given in the student briefing because in
+# a real insider investigation you always have it, and withholding it would
+# make the exercise artificial rather than harder.
+# =============================================================================
+
+scenario_id: insider-usb-exfiltration-01
+title: "Departing Employee Data Theft to Removable Media"
+
+description: >
+  Marcus Feldt, a senior sales engineer at Cadence Industrial Group, gives
+  four weeks' notice on 3 September. He is leaving for a direct competitor,
+  though he has told his manager only that he is "moving on".
+
+  Over his final week he copies a large volume of commercially sensitive
+  material to a personal USB drive: the full customer pricing database
+  export, three years of contract renewals, the FY26 sales pipeline, and
+  the proprietary product roadmap. He accesses all of it using his own
+  credentials, from his own laptop, during working hours. He holds
+  legitimate permissions for every single file.
+
+  Three things distinguish this from his normal work. First, VOLUME — he
+  copies more in one week than in the preceding six months combined.
+  Second, BREADTH — he touches accounts and regions outside his own
+  territory, which he has access to but has never previously opened.
+  Third, DESTINATION — the copies go to removable media rather than the
+  approved cloud workspace he has used for every prior piece of work.
+
+  He also archives the material into a password-protected 7-Zip file before
+  copying, which is not something he has ever done for legitimate work and
+  which defeats the DLP content inspection that would otherwise have
+  flagged the pricing data.
+
+  The activity is discovered during routine offboarding review, nine days
+  after it began. By then the USB device has been connected and removed
+  five times and the employee has left the business.
+
+student_briefing: >
+  Cadence Industrial Group's offboarding process includes a review of
+  departing employees' file activity. That review has flagged the account
+  of Marcus Feldt (Sales Engineering), whose last day was 30 September.
+  HR has confirmed he resigned on 3 September and has since joined a
+  competitor.
+
+  You have Windows event logs, including Sysmon, from his laptop covering
+  22-30 September.
+
+  Determine whether the flagged activity represents data theft or normal
+  end-of-employment work. Marcus held legitimate access to the systems
+  involved, so "he was authorized" is not by itself an answer either way —
+  your assessment needs to rest on what the pattern of activity shows.
+
+  Be precise about what the evidence supports, what it suggests but does
+  not prove, and what you would need in order to be certain. This matters:
+  your report may be read by HR and by legal counsel, and an overstated
+  conclusion is as much of a problem as a missed one.
+
+difficulty: intermediate
+version: "1.0"
+seed: 20250922
+
+organization:
+  name: Cadence Industrial Group
+  domain: cadenceindustrial.example
+  industry: Industrial Manufacturing
+  timezone: UTC
+
+mitre_tactics:
+  - Collection
+  - Exfiltration
+
+learning_objectives:
+  - Build a behavioural case from activity that is entirely within the subject's permissions
+  - Use volume and breadth against a personal baseline rather than an absolute threshold
+  - Recognize archiving/encryption before copy as a DLP-evasion step
+  - Identify removable media as an exfiltration channel from file paths alone
+  - Correlate file activity against HR timeline context (resignation date)
+  - Separate what the evidence proves from what it merely suggests
+  - Control false positives in a dataset where most activity is legitimate
+
+tags: [insider-threat, data-theft, usb, removable-media, exfiltration, dlp-evasion, intermediate]
+
+start_time: "2025-09-22T08:00:00Z"
+
+actors:
+  subject:
+    username: mfeldt
+    email: mfeldt@cadenceindustrial.example
+    display_name: Marcus Feldt
+    department: Sales Engineering
+    role_title: Senior Sales Engineer
+    employee_id: CIG-3311
+    is_privileged: false
+  colleague:
+    username: pnwosu
+    email: pnwosu@cadenceindustrial.example
+    display_name: Priya Nwosu
+    department: Sales Engineering
+    role_title: Sales Engineer
+    employee_id: CIG-3407
+
+hosts:
+  laptop:
+    hostname: CIG-LT-3311
+    ip_address: 10.60.22.77
+    host_type: laptop
+    os: windows
+    os_version: "Windows 11 Enterprise 24H2"
+    domain_joined: true
+
+timeline:
+  # ---- Monday: an ordinary day, establishing the baseline ---------------
+  - id: mon-login
+    at: "+0m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: info
+    actor: subject
+    host: laptop
+    description: >
+      BENIGN. Normal Monday morning logon at 08:00 from the subject's own
+      laptop. Establishes the working pattern.
+    process:
+      pid: 1204
+      ppid: 780
+      name: winlogon.exe
+      command_line: "winlogon.exe"
+      parent_name: services.exe
+
+  - id: mon-normal-work
+    at: "+42m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: info
+    actor: subject
+    host: laptop
+    description: >
+      BENIGN. Routine work: a proposal document saved to the approved cloud
+      workspace folder. Note the destination — this is where all of the
+      subject's legitimate output has always gone, which is what makes the
+      later removable-media destination stand out.
+    file:
+      path: C:\Users\mfeldt\CadenceWorkspace\Proposals\Q4-Ashworth-Rev2.docx
+      filename: Q4-Ashworth-Rev2.docx
+      size_bytes: 284416
+
+  - id: mon-colleague-share
+    at: "+2h15m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: info
+    actor: colleague
+    host: laptop
+    description: >
+      BENIGN. A colleague, Priya, saves a shared file during a working
+      session on the same laptop. Present so students don't attribute every
+      event on the host to the subject — attribution matters.
+    file:
+      path: C:\Users\mfeldt\CadenceWorkspace\Shared\pipeline-review-notes.xlsx
+      filename: pipeline-review-notes.xlsx
+      size_bytes: 41984
+
+  # ---- Tuesday: the USB appears -----------------------------------------
+  - id: usb-first-insert
+    at: "+1d1h5m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: medium
+    actor: subject
+    host: laptop
+    description: >
+      FIRST SIGNAL. A removable volume is mounted as E:. This alone is not
+      misconduct — the company permits USB use — but it is the first
+      appearance of this device on this host, and it becomes the anchor for
+      everything that follows.
+    mitre:
+      technique_id: T1052.001
+      technique_name: "Exfiltration Over Physical Medium: Exfiltration over USB"
+      tactic: Exfiltration
+    file:
+      path: E:\
+      filename: "(removable volume mounted)"
+    extra:
+      device_type: "USB Mass Storage"
+      volume_label: "SANDISK64"
+      volume_serial: "A4C7-91E2"
+      first_seen: true
+
+  - id: pricing-db-access
+    at: "+1d1h22m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: high
+    actor: subject
+    host: laptop
+    description: >
+      The subject exports the full customer pricing database. He has
+      permission to run this export; what is unusual is scope. His role
+      requires pricing for his own accounts, and prior exports in his
+      history are single-region. This one is unfiltered and covers every
+      region.
+    mitre:
+      technique_id: T1005
+      technique_name: "Data from Local System"
+      tactic: Collection
+    file:
+      path: C:\Users\mfeldt\Downloads\pricing_master_export_all_regions.csv
+      filename: pricing_master_export_all_regions.csv
+      sha256: "4a8f2d61c093b7e5a21d68f04c9b3e7250fa1d86b39c04e7a5218de63b0f91cc"
+      size_bytes: 47185920
+
+  - id: contracts-access
+    at: "+1d1h48m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: high
+    actor: subject
+    host: laptop
+    description: >
+      Three years of contract renewal documents are copied from the
+      department share to a local staging folder. These cover accounts
+      across all territories, including regions the subject has never
+      worked and has no business reason to review during his notice period.
+    mitre:
+      technique_id: T1039
+      technique_name: "Data from Network Shared Drive"
+      tactic: Collection
+    file:
+      path: C:\Users\mfeldt\Downloads\staging\contracts_2023_2025.zip
+      filename: contracts_2023_2025.zip
+      sha256: "b71e33c9d4a0f28516ce7b4d92038af6c15e70d4832bb9e106f4c27a58d3e0b7"
+      size_bytes: 213909504
+
+  - id: benign-expense-report
+    at: "+1d3h30m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: info
+    actor: subject
+    host: laptop
+    description: >
+      BENIGN and deliberately placed mid-attack. A genuine expense report
+      for a client visit, saved to the normal workspace folder. Students who
+      have decided "everything mfeldt does this week is theft" will flag it
+      and lose precision. Not every action by a subject under investigation
+      is part of the misconduct.
+    file:
+      path: C:\Users\mfeldt\CadenceWorkspace\Admin\expenses-september.xlsx
+      filename: expenses-september.xlsx
+      size_bytes: 28672
+
+  # ---- Wednesday: staging, archiving, and the first copy ----------------
+  - id: roadmap-access
+    at: "+2d2h10m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: high
+    actor: subject
+    host: laptop
+    description: >
+      The proprietary product roadmap is copied to staging. This is the
+      single most commercially damaging item in the set — it is the
+      company's forward product strategy, and it is not something a
+      departing sales engineer has any legitimate reason to retain.
+    mitre:
+      technique_id: T1039
+      technique_name: "Data from Network Shared Drive"
+      tactic: Collection
+    file:
+      path: C:\Users\mfeldt\Downloads\staging\product_roadmap_FY26_FY28.pdf
+      filename: product_roadmap_FY26_FY28.pdf
+      sha256: "9c04e2a5b8137fd6e042a91c75b3068de41fa927c05b8e3d47a196fb2c80d514"
+      size_bytes: 18874368
+
+  - id: pipeline-access
+    at: "+2d2h35m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: high
+    actor: subject
+    host: laptop
+    description: >
+      The FY26 sales pipeline, including forecast values and named
+      opportunities across the whole business.
+    mitre:
+      technique_id: T1005
+      technique_name: "Data from Local System"
+      tactic: Collection
+    file:
+      path: C:\Users\mfeldt\Downloads\staging\pipeline_FY26_full.xlsx
+      filename: pipeline_FY26_full.xlsx
+      sha256: "2e5b90ad713c6f84025de19b7a3c48f60d92a5e138bc740f9a26c15b83e0d472"
+      size_bytes: 9437184
+
+  - id: archive-encrypted
+    at: "+2d3h4m"
+    event_type: data_staging
+    log_sources: [windows]
+    severity: critical
+    actor: subject
+    host: laptop
+    description: >
+      THE KEY EVENT. Everything staged is compressed into a
+      PASSWORD-PROTECTED 7-Zip archive. Note the -p flag on the command
+      line. This matters for three reasons: the subject has never used
+      7-Zip for legitimate work, encryption serves no business purpose for
+      a file being moved within his own control, and it defeats the DLP
+      content inspection that would otherwise have recognized the pricing
+      data. Encrypting before copying is the step that turns a defensible
+      "I was taking my own work" into deliberate concealment, and it is the
+      strongest single indicator of intent in the whole dataset.
+    mitre:
+      technique_id: T1560.001
+      technique_name: "Archive Collected Data: Archive via Utility"
+      tactic: Collection
+    process:
+      pid: 6612
+      ppid: 4408
+      name: 7z.exe
+      command_line: '"C:\Program Files\7-Zip\7z.exe" a -t7z -mhe=on -p C:\Users\mfeldt\Downloads\archive_personal.7z C:\Users\mfeldt\Downloads\staging\*'
+      parent_name: explorer.exe
+      sha256: "d5a1e8f37209c46b8e10437fa2c9d5860be71a34cd902f5e816b47d2a09c3e6f"
+      integrity_level: Medium
+    file:
+      path: C:\Users\mfeldt\Downloads\archive_personal.7z
+      filename: archive_personal.7z
+      sha256: "6f3d21ba95c0847e13cfa2065db984e73a10c95f2ed4b6180a94e37cb521f0a8"
+      size_bytes: 251658240
+
+  - id: usb-copy-1
+    at: "+2d3h19m"
+    event_type: data_exfiltration
+    log_sources: [windows]
+    severity: critical
+    actor: subject
+    host: laptop
+    description: >
+      THE EXFILTRATION. The encrypted archive is written to the removable
+      volume. Identical size and hash to the local archive, confirming a
+      copy rather than a move or a different file. 240 MB of the company's
+      most sensitive commercial material now exists on a device the company
+      does not control.
+    mitre:
+      technique_id: T1052.001
+      technique_name: "Exfiltration Over Physical Medium: Exfiltration over USB"
+      tactic: Exfiltration
+    file:
+      path: E:\archive_personal.7z
+      filename: archive_personal.7z
+      sha256: "6f3d21ba95c0847e13cfa2065db984e73a10c95f2ed4b6180a94e37cb521f0a8"
+      size_bytes: 251658240
+    extra:
+      destination_volume: "E: (SANDISK64)"
+      volume_serial: "A4C7-91E2"
+
+  # ---- Thursday: cleanup attempt ----------------------------------------
+  - id: staging-deleted
+    at: "+3d1h12m"
+    event_type: file_deleted
+    log_sources: [windows]
+    severity: high
+    actor: subject
+    host: laptop
+    description: >
+      The local staging folder and the archive are deleted. Consistent with
+      cleaning up after the copy. Worth noting for the report: deletion
+      removes the files but not the Sysmon record of their creation, which
+      is why the timeline survives.
+    mitre:
+      technique_id: T1070.004
+      technique_name: "Indicator Removal: File Deletion"
+      tactic: Defense Evasion
+    file:
+      path: C:\Users\mfeldt\Downloads\archive_personal.7z
+      filename: archive_personal.7z
+      sha256: "6f3d21ba95c0847e13cfa2065db984e73a10c95f2ed4b6180a94e37cb521f0a8"
+      size_bytes: 251658240
+
+  - id: benign-handover
+    at: "+3d4h2m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: info
+    actor: subject
+    host: laptop
+    description: >
+      BENIGN. A genuine handover document for his replacement, saved to the
+      approved workspace. This is what legitimate end-of-employment work
+      actually looks like, and it stands in useful contrast to the staging
+      folder activity.
+    file:
+      path: C:\Users\mfeldt\CadenceWorkspace\Admin\handover-notes-mfeldt.docx
+      filename: handover-notes-mfeldt.docx
+      size_bytes: 96256
+
+  # ---- Following Monday: a second round ---------------------------------
+  - id: usb-second-insert
+    at: "+6d1h30m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: high
+    actor: subject
+    host: laptop
+    description: >
+      The same removable volume is mounted again — same volume serial
+      A4C7-91E2. Repetition matters: a single copy might be argued as
+      carelessness, a repeated pattern is much harder to explain.
+    mitre:
+      technique_id: T1052.001
+      technique_name: "Exfiltration Over Physical Medium: Exfiltration over USB"
+      tactic: Exfiltration
+    file:
+      path: E:\
+      filename: "(removable volume mounted)"
+    extra:
+      device_type: "USB Mass Storage"
+      volume_label: "SANDISK64"
+      volume_serial: "A4C7-91E2"
+
+  - id: crm-bulk-export
+    at: "+6d2h5m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: critical
+    actor: subject
+    host: laptop
+    description: >
+      A bulk CRM export covering all customer contacts company-wide, not
+      just his territory. This is the customer list — the asset a competitor
+      would value most directly.
+    mitre:
+      technique_id: T1005
+      technique_name: "Data from Local System"
+      tactic: Collection
+    file:
+      path: C:\Users\mfeldt\Downloads\crm_contacts_all.csv
+      filename: crm_contacts_all.csv
+      sha256: "83b2c47e09fd156a4e0c918bd357f2a640e19c85d720b4f3ea6c108d59f2b74e"
+      size_bytes: 33554432
+
+  - id: usb-copy-2
+    at: "+6d2h28m"
+    event_type: data_exfiltration
+    log_sources: [windows]
+    severity: critical
+    actor: subject
+    host: laptop
+    description: >
+      Second confirmed copy to removable media. Same volume serial as the
+      first. At this point the pattern is established beyond reasonable
+      alternative explanation.
+    mitre:
+      technique_id: T1052.001
+      technique_name: "Exfiltration Over Physical Medium: Exfiltration over USB"
+      tactic: Exfiltration
+    file:
+      path: E:\crm_contacts_all.csv
+      filename: crm_contacts_all.csv
+      sha256: "83b2c47e09fd156a4e0c918bd357f2a640e19c85d720b4f3ea6c108d59f2b74e"
+      size_bytes: 33554432
+    extra:
+      destination_volume: "E: (SANDISK64)"
+      volume_serial: "A4C7-91E2"
+
+  - id: offboarding-review
+    at: "+8d6h0m"
+    event_type: alert_triggered
+    log_sources: [windows]
+    severity: critical
+    actor: subject
+    host: laptop
+    description: >
+      Routine offboarding review flags the account, nine days after the
+      activity began and after the subject has already left. Debrief point:
+      every one of these events was logged in real time and none of them
+      generated an alert, because no rule existed for "authorized user,
+      unusual volume, removable destination".
+    mitre:
+      technique_id: T1052.001
+      technique_name: "Exfiltration Over Physical Medium: Exfiltration over USB"
+      tactic: Exfiltration
+
+answer_key:
+  - id: q1
+    question: "Does this activity represent data theft, or normal end-of-employment work? State your assessment and your confidence."
+    answer: >
+      Assessed as deliberate data theft, with high confidence. The
+      assessment rests on the combination of four factors, none of which is
+      sufficient alone: (1) volume far exceeding the subject's baseline,
+      (2) breadth extending well outside his own territory into accounts he
+      has never previously accessed, (3) destination being removable media
+      rather than the approved cloud workspace he used for all prior work,
+      and (4) password-protected archiving immediately before copying, which
+      has no legitimate business purpose and defeats content inspection.
+      Authorization is not in question — he had permission for every file.
+      The finding is about pattern and intent, not access rights.
+    related_event_ids: [archive-encrypted, usb-copy-1, usb-copy-2, crm-bulk-export]
+    hint: "No single event proves this. Build the case from the combination."
+    points: 4
+
+  - id: q2
+    question: "What data was copied to removable media, and how much?"
+    answer: >
+      Two confirmed copies to volume E: (label SANDISK64, serial
+      A4C7-91E2). First, archive_personal.7z at 240 MB, containing the
+      three-year contract set, the FY26 sales pipeline, and the FY26-FY28
+      product roadmap. Second, crm_contacts_all.csv at 32 MB, a company-wide
+      customer contact export. Roughly 272 MB total. Both copies are
+      confirmed by matching SHA-256 hashes between the source file and the
+      file written to E:.
+    related_event_ids: [usb-copy-1, usb-copy-2, archive-encrypted, crm-bulk-export]
+    points: 3
+
+  - id: q3
+    question: "Why is the 7-Zip archiving step significant beyond simply bundling files?"
+    answer: >
+      The command line includes -p (password protection) and -mhe=on
+      (encrypt headers, hiding even the filenames). Encrypting data being
+      moved within one's own control serves no legitimate purpose, and it
+      specifically defeats DLP content inspection that would have recognized
+      the pricing and customer data. The subject had no history of using
+      7-Zip for legitimate work. This is the clearest evidence of intent to
+      conceal, as distinct from carelessness.
+    related_event_ids: [archive-encrypted]
+    points: 3
+
+  - id: q4
+    question: "Which events in this dataset are NOT part of the misconduct?"
+    answer: >
+      Four: the Monday logon, the Q4-Ashworth proposal saved to the approved
+      workspace, the colleague Priya Nwosu's shared file save (which is not
+      even the subject's activity), the September expense report, and the
+      handover notes for his replacement. The expense report and handover
+      notes are especially important — they occur during the same window as
+      the theft and demonstrate that not every action by a subject under
+      investigation is misconduct.
+    related_event_ids: [mon-login, mon-normal-work, mon-colleague-share, benign-expense-report, benign-handover]
+    hint: "Check the destination folder and the actor on each event."
+    points: 3
+
+  - id: q5
+    question: "What does this evidence NOT prove, and what would you need to establish it?"
+    answer: >
+      It does not prove what happened to the data after it left the laptop —
+      whether it was ever opened, shared, or provided to the competitor. It
+      does not prove the archive's contents, since it is encrypted and the
+      password is unknown; contents are inferred from what was staged
+      immediately before. It does not establish whether other channels
+      (personal cloud storage, email, printing) were also used, since only
+      endpoint logs were provided. To close these gaps: forensic acquisition
+      of the USB device if recoverable, proxy and email logs for the same
+      period, DLP logs, and physical badge records to corroborate presence.
+    related_event_ids: [archive-encrypted, usb-copy-1]
+    hint: "Be careful here. This report may be read by legal counsel."
+    points: 4
+
+  - id: q6
+    question: "Why did none of this generate a real-time alert, and what control would change that?"
+    answer: >
+      Every action was performed by an authorized user with valid
+      credentials accessing files they had permission to access, so no
+      access-control or authentication rule was violated. Detection requires
+      behavioural rules rather than permission-based ones: alerting on
+      volume anomalies against a per-user baseline, on access to data
+      outside a user's normal territory, on writes to removable media
+      (especially archives), and on encrypted-archive creation. Placing
+      departing employees under heightened monitoring from the resignation
+      date onward would have caught this within a day rather than nine.
+    related_event_ids: [offboarding-review, usb-first-insert, archive-encrypted]
+    points: 3

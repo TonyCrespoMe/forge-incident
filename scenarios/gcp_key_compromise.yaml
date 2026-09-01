@@ -92,7 +92,7 @@ actors:
     # as an `actor:` on any event below, since neither GCP audit logs nor
     # the Linux auth log actually identify this person.
     username: unknown
-    email: unknown@unknown.external
+    email: unknown@unattributed.example
     display_name: Unattributed External Actor
     is_compromised: true
 

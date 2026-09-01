@@ -69,7 +69,10 @@ _DEFAULT_TEMPLATE = "phishing_to_exfil"
 
 _DIFFICULTY_KEYWORDS: dict[Difficulty, tuple[str, ...]] = {
     Difficulty.BEGINNER: ("beginner", "intro", "introductory", "easy", "101", "first scenario"),
-    Difficulty.ADVANCED: ("advanced", "expert", "hard", "sophisticated", "apt", "nation-state"),
+    # Checked before ADVANCED so an explicitly "expert" prompt isn't swallowed
+    # by the broader advanced keyword set (dict order is insertion order).
+    Difficulty.EXPERT: ("expert", "hardest", "nation-state", "apt", "red team", "multi-day"),
+    Difficulty.ADVANCED: ("advanced", "hard", "sophisticated", "targeted"),
 }
 
 
