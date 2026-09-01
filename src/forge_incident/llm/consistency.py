@@ -29,7 +29,11 @@ _EXPECTED_EVENT_COUNT_RANGE: dict[Difficulty, tuple[int, int]] = {
     Difficulty.BEGINNER: (6, 16),
     Difficulty.INTERMEDIATE: (12, 28),
     Difficulty.ADVANCED: (20, 45),
-    Difficulty.EXPERT: (30, 70),
+    # Lower bound aligned with tests/test_curriculum.py's sanity floor. Expert
+    # difficulty is about incomplete and misleading evidence, not bulk -- a
+    # 26-event scenario across four hosts with a real visibility gap is
+    # genuinely expert, and warning about it would be noise.
+    Difficulty.EXPERT: (25, 70),
 }
 
 

@@ -52,7 +52,7 @@ start_time: "2025-06-01T14:00:00Z"
 actors:
   attacker:
     username: unknown
-    email: unknown@unknown.external
+    email: unknown@unattributed.example
     display_name: Unknown
 hosts:
   web:

@@ -61,13 +61,45 @@ def test_scenario_ids_are_unique():
     assert len(ids) == len(set(ids))
 
 
-def test_catalog_covers_a_difficulty_progression():
-    """A newcomer needs somewhere to start. If the easiest bundled scenario
-    is intermediate, the catalog has no on-ramp."""
+def test_catalog_covers_every_difficulty_tier():
+    """A newcomer needs somewhere to start and an experienced analyst needs
+    somewhere to go. Every tier must be represented."""
     tiers = {s.difficulty for s in _all_scenarios()}
-    assert Difficulty.BEGINNER in tiers, "catalog needs at least one beginner scenario"
-    assert Difficulty.INTERMEDIATE in tiers
-    assert Difficulty.ADVANCED in tiers
+    for tier in Difficulty:
+        assert tier in tiers, f"catalog has no {tier.value} scenario"
+
+
+def test_expert_scenarios_include_a_deliberate_visibility_gap():
+    """Per models.Difficulty, expert means the evidence is incomplete: some
+    action must be visible on one host while the source that would normally
+    record it is silent. A scenario labelled expert without one is really
+    just a long advanced scenario."""
+    for scenario in _all_scenarios():
+        if scenario.difficulty is not Difficulty.EXPERT:
+            continue
+        # A gap exists if some host's telemetry stops mid-timeline: at least
+        # one log source appears earlier in the scenario and then stops while
+        # events on that same host continue.
+        per_host_sources: dict[str, set] = {}
+        for event in scenario.timeline:
+            if event.host:
+                per_host_sources.setdefault(event.host, set()).update(event.log_sources)
+
+        gap_found = False
+        for host, sources in per_host_sources.items():
+            host_events = [e for e in scenario.timeline if e.host == host]
+            for source in sources:
+                using = [e for e in host_events if source in e.log_sources]
+                if not using:
+                    continue
+                last_use = max(e.timestamp for e in using)
+                later = [e for e in host_events if e.timestamp > last_use]
+                if len(later) >= 3:
+                    gap_found = True
+        assert gap_found, (
+            f"{scenario.scenario_id} is labelled expert but no log source goes "
+            "silent mid-timeline while events on that host continue"
+        )
 
 
 def test_event_counts_match_their_declared_difficulty():

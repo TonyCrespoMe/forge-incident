@@ -19,7 +19,9 @@ BUNDLED_SCENARIO_FILENAMES = [
     "phishing_to_exfil.yaml",
     "insider_usb_exfiltration.yaml",
     "gcp_key_compromise.yaml",
+    "stolen_dev_credentials_aws.yaml",
     "webshell_to_dc_compromise.yaml",
+    "ransomware_full_chain.yaml",
 ]
 
 

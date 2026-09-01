@@ -1,0 +1,982 @@
+# ForgeIncident scenario file
+# =============================================================================
+# EXPERT TIER (curriculum E1). The first expert-tier scenario and the most
+# demanding in the catalog. Per models.Difficulty, expert means the evidence
+# is incomplete and partly misleading, and a correct answer must say so.
+#
+# The three expert-tier devices, all live here:
+#
+# 1. VISIBILITY GAP. The EDR agent on the file server was uninstalled by the
+#    attacker (`edr-tamper`) four hours before encryption. Everything that
+#    happened on FS-CORE-02 after that point is absent from CrowdStrike and
+#    must be inferred from firewall and Windows telemetry. Students who
+#    reconstruct only what the EDR shows will materially understate the
+#    incident.
+#
+# 2. MISLEADING ARTIFACT. A legitimate, scheduled backup job
+#    (`decoy-backup-job`) runs at 02:00 on the same server, reading the same
+#    file shares at high volume, hours before the real staging. It looks
+#    exactly like data collection. It is not. An analyst who reports it as
+#    the exfiltration will produce a confidently wrong timeline.
+#
+# 3. MULTI-DAY DWELL. Nine days from initial access to encryption, with two
+#    quiet periods. The pre-encryption activity is the part nobody looked
+#    at, and reconstructing it is the actual exercise — by the time the
+#    ransom note appears, the interesting work is already over.
+#
+# Also note what is deliberately NOT here: no phishing email is included,
+# because the mail gateway logs were not retained. The initial access vector
+# must be assessed from the endpoint evidence alone, and the honest answer
+# is a qualified one.
+# =============================================================================
+
+scenario_id: ransomware-full-chain-01
+title: "Ransomware: Nine-Day Dwell to Domain-Wide Encryption"
+
+description: >
+  Ardent Valley Health Services is encrypted across its file and application
+  servers on the morning of 24 October. The visible incident is four hours
+  long. The actual intrusion began nine days earlier.
+
+  Initial access is via a compromised VPN account belonging to a contract
+  radiologist, authenticating from an unusual geography with no MFA
+  enforced. Mail gateway logs were not retained, so whether the credential
+  came from phishing, an infostealer, or a broker cannot be determined from
+  the evidence provided — a qualified assessment is the correct answer here,
+  not a confident guess.
+
+  Over the following week the actor performs slow, low-volume
+  reconnaissance: AD enumeration, a single Kerberoasting request, and
+  credential access on a jump host. They obtain a service account with
+  administrative rights across the server estate. Two quiet periods (three
+  days, then two) separate the phases, which is what makes the activity
+  hard to correlate as one campaign.
+
+  On day nine they stage data for double extortion, exfiltrate 41 GB to a
+  cloud storage provider, uninstall the EDR agent on the
+  file server, delete volume shadow copies, and deploy the encryptor via
+  Group Policy to 214 endpoints.
+
+  Two complications for the analyst. First, the EDR uninstall creates a
+  genuine visibility gap on FS-CORE-02 — the encryption itself is not in
+  CrowdStrike at all and must be reconstructed from firewall and Windows
+  evidence. Second, a legitimate scheduled backup job runs at 02:00 that
+  same night, reading the same shares at high volume; it superficially
+  resembles data staging and is a trap for anyone pattern-matching on
+  "large read volume".
+
+student_briefing: >
+  Ardent Valley Health Services began its incident response at 06:40 on
+  24 October when staff arrived to find file shares inaccessible and ransom
+  notes on multiple servers. Clinical systems are degraded and the
+  organization is operating on paper.
+
+  You have four sources covering 15-24 October: CrowdStrike Falcon
+  detections, Windows event logs from the VPN concentrator, jump host and
+  file server, firewall traffic logs, and Palo Alto perimeter logs.
+
+  Leadership needs three things from you, in this order. First, how far
+  back does this go — when did the intruder actually get in, and how?
+  Second, was data stolen before encryption, and if so how much and to
+  where? This determines whether the organization has a breach
+  notification obligation. Third, what is the current state of the
+  attacker's access.
+
+  Note that the environment's telemetry is not uniform across the whole
+  period or across all hosts. Where the evidence does not support a
+  conclusion, say so explicitly and state what you would need — an
+  overstated timeline is worse than an incomplete one when regulators and
+  insurers will read this report.
+
+difficulty: expert
+version: "1.0"
+seed: 20251024
+
+organization:
+  name: Ardent Valley Health Services
+  domain: ardentvalley.example
+  industry: Healthcare
+  timezone: UTC
+
+mitre_tactics:
+  - Initial Access
+  - Discovery
+  - Credential Access
+  - Lateral Movement
+  - Collection
+  - Exfiltration
+  - Defense Evasion
+  - Impact
+
+learning_objectives:
+  - Reconstruct a multi-day dwell period across separated activity bursts
+  - Distinguish a legitimate high-volume backup job from attacker data staging
+  - Identify EDR tampering and correctly scope the resulting visibility gap
+  - Establish whether exfiltration preceded encryption (breach notification trigger)
+  - Recognize shadow copy deletion as the point recovery options narrow
+  - Trace GPO-based mass deployment as the encryption delivery mechanism
+  - State an initial access vector as a qualified assessment when logs are missing
+  - Separate proven facts from inference in a report with regulatory consequences
+
+tags: [ransomware, double-extortion, edr-tampering, vpn, kerberoasting, gpo, expert]
+
+start_time: "2025-10-15T22:14:00Z"
+
+actors:
+  contractor:
+    username: rvasquez
+    email: rvasquez@ardentvalley.example
+    display_name: Renata Vasquez
+    department: Radiology
+    role_title: Contract Radiologist
+    employee_id: AVH-C-0442
+    is_compromised: true
+  svc_backup:
+    # Legitimate service account. Its scheduled job is the misleading
+    # artifact -- it does exactly what data staging looks like, nightly.
+    username: svc-avbackup
+    email: svc-avbackup@ardentvalley.example
+    display_name: "Backup Service Account"
+    department: Infrastructure
+    role_title: Automation Identity
+    is_privileged: true
+  svc_imaging:
+    # The account the attacker cracks and then abuses.
+    username: svc-imaging
+    email: svc-imaging@ardentvalley.example
+    display_name: "Imaging Platform Service Account"
+    department: Infrastructure
+    role_title: Service Account
+    is_compromised: true
+    is_privileged: true
+  attacker:
+    username: unknown
+    email: unknown@unattributed.example
+    display_name: Unattributed External Actor
+    is_compromised: true
+
+hosts:
+  vpn:
+    hostname: AVH-VPN-01
+    ip_address: 10.8.0.5
+    host_type: server
+    os: windows
+    os_version: "Windows Server 2022 Standard"
+    domain_joined: true
+  jump:
+    hostname: AVH-JUMP-03
+    ip_address: 10.8.12.33
+    host_type: server
+    os: windows
+    os_version: "Windows Server 2022 Standard"
+    domain_joined: true
+  fileserver:
+    hostname: FS-CORE-02
+    ip_address: 10.8.20.14
+    host_type: server
+    os: windows
+    os_version: "Windows Server 2019 Datacenter"
+    domain_joined: true
+  dc:
+    hostname: AVH-DC-01
+    ip_address: 10.8.4.10
+    host_type: domain_controller
+    os: windows
+    os_version: "Windows Server 2022 Datacenter"
+    domain_joined: true
+
+timeline:
+  # ==== DAY 1 (15 Oct) — initial access ==================================
+  - id: vpn-login-anomalous
+    at: "+0m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: high
+    actor: contractor
+    host: vpn
+    description: >
+      INITIAL ACCESS. A successful VPN authentication for the contract
+      radiologist at 22:14 local, from an address geolocated well outside
+      her normal working region. No MFA challenge is recorded for this
+      account. This is the earliest attacker activity in the dataset and
+      the anchor for the whole timeline.
+
+      IMPORTANT for the answer key: HOW the credential was obtained cannot
+      be determined here. Mail gateway logs were not retained and no
+      endpoint telemetry exists for her personal device. Phishing,
+      infostealer, and credential broker are all consistent with the
+      evidence, and the correct report says so.
+    mitre:
+      technique_id: T1078
+      technique_name: "Valid Accounts"
+      tactic: Initial Access
+    extra:
+      logon_type: 3
+      authentication_package: "RADIUS"
+      mfa_challenge: "none recorded"
+      source_geolocation: "outside normal region"
+    network:
+      protocol: tcp
+      src_ip: 176.53.14.209
+      src_port: 55214
+      dst_ip: 10.8.0.5
+      dst_port: 443
+      action: allow
+
+  - id: benign-contractor-normal
+    at: "-6h20m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: info
+    actor: contractor
+    host: vpn
+    description: >
+      BENIGN. Renata's genuine VPN session earlier the same afternoon, from
+      her usual regional address. The baseline that makes the 22:14 session
+      anomalous — without this, "unusual geography" is an assertion rather
+      than a finding.
+    extra:
+      logon_type: 3
+      authentication_package: "RADIUS"
+      source_geolocation: "normal region"
+    network:
+      protocol: tcp
+      src_ip: 203.0.113.140
+      src_port: 51002
+      dst_ip: 10.8.0.5
+      dst_port: 443
+      action: allow
+
+  - id: ad-enumeration
+    at: "+41m"
+    event_type: lateral_movement
+    log_sources: [windows, crowdstrike]
+    severity: medium
+    actor: contractor
+    host: jump
+    description: >
+      Quiet Active Directory enumeration from the jump host. Deliberately
+      LOW severity and low volume — a handful of LDAP queries over twenty
+      minutes, well under any rate threshold. This is what competent
+      reconnaissance looks like, and it is why the campaign was not
+      correlated at the time.
+    mitre:
+      technique_id: T1087.002
+      technique_name: "Account Discovery: Domain Account"
+      tactic: Discovery
+    process:
+      pid: 5120
+      ppid: 4408
+      name: powershell.exe
+      command_line: 'powershell -NoProfile -Command "Get-ADUser -Filter * -Properties ServicePrincipalName | Where-Object {$_.ServicePrincipalName -ne $null}"'
+      parent_name: mstsc.exe
+      integrity_level: High
+
+  - id: jump-host-session
+    at: "+1h4m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: medium
+    actor: contractor
+    host: jump
+    description: >
+      The compromised VPN account opens an RDP session to the jump host.
+      Renata's role does not require jump host access; the account has it
+      only because contractors were placed in a broad access group. Standing
+      access nobody audited is what turns a single credential into a
+      foothold.
+    mitre:
+      technique_id: T1078
+      technique_name: "Valid Accounts"
+      tactic: Initial Access
+    extra:
+      logon_type: 10
+      source_ip: "10.8.0.5"
+
+  - id: defender-exclusion
+    at: "+1h29m"
+    event_type: registry_modified
+    log_sources: [windows, crowdstrike]
+    severity: high
+    actor: contractor
+    host: jump
+    description: >
+      A Defender exclusion is added for C:\Windows\Temp. Small, quiet, and
+      done on night one — nine days before it matters. Early environment
+      preparation like this is routinely dismissed as administrative noise
+      when it appears in isolation.
+    mitre:
+      technique_id: T1562.001
+      technique_name: "Impair Defenses: Disable or Modify Tools"
+      tactic: Defense Evasion
+    process:
+      pid: 5344
+      ppid: 5120
+      name: powershell.exe
+      command_line: 'powershell -Command "Add-MpPreference -ExclusionPath C:\Windows\Temp"'
+      parent_name: mstsc.exe
+      integrity_level: High
+
+  - id: benign-helpdesk
+    at: "+1d9h12m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: info
+    actor: svc_backup
+    host: jump
+    description: >
+      BENIGN. Routine infrastructure work on the jump host during business
+      hours the following day. Ordinary administrative activity that shares
+      a host with the intrusion.
+    extra:
+      logon_type: 10
+      source_ip: "10.8.12.9"
+
+  # ==== QUIET PERIOD (3 days) ============================================
+
+  # ==== DAY 4 (19 Oct) — credential access ===============================
+  - id: kerberoast-request
+    at: "+3d19h6m"
+    event_type: credential_harvested
+    log_sources: [windows]
+    severity: high
+    actor: contractor
+    host: dc
+    description: >
+      A single Kerberos service ticket request for the svc-imaging account,
+      using RC4 encryption. ONE request — not a burst — which is why no
+      threshold-based Kerberoasting rule fired. The cracking happens offline
+      and leaves no trace anywhere in this dataset; the next time
+      svc-imaging appears, the attacker already has its password.
+    mitre:
+      technique_id: T1558.003
+      technique_name: "Steal or Forge Kerberos Tickets: Kerberoasting"
+      tactic: Credential Access
+    extra:
+      service_name: "svc-imaging"
+      ticket_encryption_type: "0x17 (RC4-HMAC)"
+      requesting_account: "rvasquez"
+
+  - id: benign-patch-window
+    at: "+3d21h30m"
+    event_type: process_created
+    log_sources: [windows, crowdstrike]
+    severity: info
+    actor: svc_backup
+    host: fileserver
+    description: >
+      BENIGN. The monthly patch window: scripted installs and a service
+      restart on the file server. Legitimate administrative activity that
+      happens to touch the same host the attacker later targets.
+    process:
+      pid: 3312
+      ppid: 780
+      name: powershell.exe
+      command_line: 'powershell -File C:\Scripts\Patch-Apply.ps1 -Cycle 2025-10'
+      parent_name: services.exe
+      integrity_level: System
+
+  # ==== QUIET PERIOD (2 days) ============================================
+
+  # ==== DAY 7 (21 Oct) — lateral movement ================================
+  - id: svc-account-first-use
+    at: "+6d18h22m"
+    event_type: account_login_success
+    log_sources: [windows]
+    severity: high
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      The cracked service account is used for the first time, authenticating
+      to the file server. Critical detail for the timeline: svc-imaging is
+      an IMAGING platform account with no legitimate reason to authenticate
+      to the general file server, and it has never done so before in this
+      dataset. Six days have passed since initial access.
+    mitre:
+      technique_id: T1078.002
+      technique_name: "Valid Accounts: Domain Accounts"
+      tactic: Lateral Movement
+    extra:
+      logon_type: 3
+      authentication_package: "Kerberos"
+      source_workstation: "AVH-JUMP-03"
+      source_ip: "10.8.12.33"
+
+  - id: share-enumeration
+    at: "+6d18h51m"
+    event_type: lateral_movement
+    log_sources: [windows, crowdstrike]
+    severity: medium
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      File share enumeration across the estate. Note this is svc-imaging
+      doing it, not a human account — automation accounts do not normally
+      browse shares.
+    mitre:
+      technique_id: T1135
+      technique_name: "Network Share Discovery"
+      tactic: Discovery
+    process:
+      pid: 6640
+      ppid: 5988
+      name: net.exe
+      command_line: '"net.exe" view \\\\FS-CORE-02 /all'
+      parent_name: cmd.exe
+      integrity_level: High
+
+  - id: backup-inventory-probe
+    at: "+6d19h40m"
+    event_type: lateral_movement
+    log_sources: [windows]
+    severity: high
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      The attacker enumerates the backup infrastructure — catalog shares and
+      appliance configuration. Ransomware operators reconnoitre backups
+      before encrypting, because recoverable backups are the only thing that
+      makes refusing to pay viable. Seeing this and understanding what it
+      predicts is the difference between a reactive and a proactive
+      response.
+    mitre:
+      technique_id: T1083
+      technique_name: "File and Directory Discovery"
+      tactic: Discovery
+    process:
+      pid: 6702
+      ppid: 5988
+      name: cmd.exe
+      command_line: '"cmd.exe" /c dir \\\\10.8.30.9\\backups /s /b'
+      parent_name: powershell.exe
+      integrity_level: High
+
+  - id: benign-backup-prior-night
+    at: "+7d3h46m"
+    event_type: file_created
+    log_sources: [windows, crowdstrike]
+    severity: info
+    actor: svc_backup
+    host: fileserver
+    description: >
+      BENIGN, and the key to disarming the decoy. The SAME backup job, at
+      the SAME time, on the night BEFORE the attack. Its presence proves the
+      02:00 high-volume read is a nightly schedule rather than attacker
+      activity — which is precisely how a student should rule out the
+      misleading artifact instead of guessing.
+    process:
+      pid: 2140
+      ppid: 780
+      name: avbackup-agent.exe
+      command_line: '"C:\Program Files\ArdentBackup\avbackup-agent.exe" --job nightly-full --target 10.8.30.9'
+      parent_name: services.exe
+      integrity_level: System
+    file:
+      path: \\10.8.30.9\backups\FS-CORE-02\2025-10-23-full.avb
+      filename: 2025-10-23-full.avb
+      size_bytes: 401230659584
+
+  # ==== DAY 9 (23-24 Oct) — the loud night ===============================
+  - id: tool-staging
+    at: "+8d2h11m"
+    event_type: malware_download
+    log_sources: [windows, crowdstrike, palo_alto]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      The attacker's toolkit is downloaded to the Defender-excluded
+      directory created on night one — rar.exe for archiving and the
+      encryptor payload. Note the destination path matches the exclusion
+      added eight days earlier: the two events are separated by more than a
+      week and only make sense together.
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    file:
+      path: C:\Windows\Temp\svchost_cache\rar.exe
+      filename: rar.exe
+      sha256: "5f1e7a03c94b2d86015fe3a7bd249c0e836f14b7a05de92c318b64f70ad2153e"
+      size_bytes: 619008
+    network:
+      protocol: tcp
+      src_ip: 10.8.20.14
+      src_port: 50114
+      dst_ip: 176.53.14.209
+      dst_port: 443
+      action: allow
+      app: ssl
+      bytes_sent: 8420
+      bytes_received: 3218432
+
+  - id: decoy-backup-job
+    at: "+8d3h46m"
+    event_type: file_created
+    log_sources: [windows, crowdstrike]
+    severity: info
+    actor: svc_backup
+    host: fileserver
+    description: >
+      THE MISLEADING ARTIFACT. The nightly scheduled backup runs at 02:00,
+      reading 380 GB across the same file shares the attacker later stages
+      from, and writing to the backup appliance. High-volume reads, a
+      service account, the middle of the night — it matches the shape of
+      data staging almost perfectly.
+
+      It is legitimate. Evidence: it runs on the same schedule every night
+      of the dataset, the destination is the internal backup appliance
+      (10.8.30.9) rather than an external address, and the executing account
+      is svc-avbackup, not the compromised svc-imaging. An analyst who
+      reports this as the exfiltration will produce a confident, wrong
+      timeline — and will also miss the real staging two hours later.
+    process:
+      pid: 2288
+      ppid: 780
+      name: avbackup-agent.exe
+      command_line: '"C:\Program Files\ArdentBackup\avbackup-agent.exe" --job nightly-full --target 10.8.30.9'
+      parent_name: services.exe
+      integrity_level: System
+    file:
+      path: \\10.8.30.9\backups\FS-CORE-02\2025-10-24-full.avb
+      filename: 2025-10-24-full.avb
+      size_bytes: 408021893120
+
+  - id: data-staging
+    at: "+8d5h58m"
+    event_type: data_staging
+    log_sources: [windows, crowdstrike]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      THE REAL STAGING. Patient records and finance shares are archived into
+      split RAR volumes in a temp directory. Compare against the backup job
+      two hours earlier: different account (svc-imaging, the compromised
+      one), different tool (rar.exe, not the backup agent), different
+      destination (local temp, not the appliance), and split volumes sized
+      for upload rather than a single backup image.
+    mitre:
+      technique_id: T1560.001
+      technique_name: "Archive Collected Data: Archive via Utility"
+      tactic: Collection
+    process:
+      pid: 7104
+      ppid: 6640
+      name: rar.exe
+      command_line: '"C:\Windows\Temp\svchost_cache\rar.exe" a -m0 -v500M -hp C:\Windows\Temp\svchost_cache\d.rar \\\\FS-CORE-02\\Patients\\* \\\\FS-CORE-02\\Finance\\*'
+      parent_name: cmd.exe
+      sha256: "5f1e7a03c94b2d86015fe3a7bd249c0e836f14b7a05de92c318b64f70ad2153e"
+      integrity_level: High
+    file:
+      path: C:\Windows\Temp\svchost_cache\d.rar
+      filename: d.rar
+      sha256: "e30b942a17cf5d68204ab7e13c9f0562d8a41e75b930cf28647a105de2b83f91"
+      size_bytes: 44023414784
+
+  - id: exfil-to-cloud
+    at: "+8d6h40m"
+    event_type: data_exfiltration
+    log_sources: [firewall_syslog, palo_alto]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      THE EXFILTRATION, and the answer to leadership's breach-notification
+      question. 41 GB uploaded to a public cloud storage provider from the
+      file server, completing roughly 100 minutes before the encryptor
+      runs. This PRECEDES encryption, which
+      means this is a data breach as well as a ransomware incident — a
+      materially different regulatory position for a healthcare provider
+      than encryption alone.
+    mitre:
+      technique_id: T1567.002
+      technique_name: "Exfiltration to Cloud Storage"
+      tactic: Exfiltration
+    network:
+      protocol: tcp
+      src_ip: 10.8.20.14
+      src_port: 49882
+      dst_ip: 185.199.108.153
+      dst_port: 443
+      action: allow
+      app: ssl
+      rule_name: "allow-outbound-https"
+      bytes_sent: 44023414784
+      bytes_received: 2841600
+
+  # ---- Defense evasion: the visibility gap opens ------------------------
+  - id: edr-tamper
+    at: "+8d7h12m"
+    event_type: log_cleared
+    log_sources: [crowdstrike, windows]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      THE VISIBILITY GAP OPENS. The EDR sensor on FS-CORE-02 is uninstalled.
+      This is the LAST CrowdStrike event for this host — everything after it
+      on the file server, including the encryption itself, is absent from
+      EDR entirely and must be reconstructed from Windows events and
+      firewall telemetry.
+
+      Two teaching points. The uninstall itself is recorded before the agent
+      stops, so the gap has a precise start time. And a sensor going silent
+      on one server while others keep reporting is itself a detectable
+      condition — an absence that should have alerted.
+    mitre:
+      technique_id: T1562.001
+      technique_name: "Impair Defenses: Disable or Modify Tools"
+      tactic: Defense Evasion
+    process:
+      pid: 7402
+      ppid: 6640
+      name: msiexec.exe
+      command_line: '"msiexec.exe" /x {5A2B91C4-7E30-4F18-B6D2-90AC1E374BD8} /qn NOREBOOT=1'
+      parent_name: cmd.exe
+      integrity_level: System
+
+  - id: shadow-copy-delete
+    at: "+8d7h44m"
+    event_type: file_deleted
+    log_sources: [windows]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      Volume shadow copies are deleted across the estate. NOT visible in
+      CrowdStrike — the sensor is already gone from this host, which is why
+      this appears only in Windows events. This is the moment local recovery
+      options close, and in most ransomware cases it is the last reliable
+      warning before encryption.
+    mitre:
+      technique_id: T1490
+      technique_name: "Inhibit System Recovery"
+      tactic: Impact
+    process:
+      pid: 7550
+      ppid: 6640
+      name: vssadmin.exe
+      command_line: '"vssadmin.exe" delete shadows /all /quiet'
+      parent_name: cmd.exe
+      integrity_level: System
+
+  - id: gpo-deployment
+    at: "+8d8h9m"
+    event_type: scheduled_task_created
+    log_sources: [windows]
+    severity: critical
+    actor: svc_imaging
+    host: dc
+    description: >
+      DELIVERY MECHANISM. A Group Policy Object is modified to create an
+      immediate scheduled task across the domain, pointing at the encryptor
+      staged on a share. This is how one compromised account becomes 214
+      encrypted endpoints in under an hour. Students should identify GPO as
+      the distribution channel, not just note that encryption occurred.
+    mitre:
+      technique_id: T1484.001
+      technique_name: "Domain or Tenant Policy Modification: Group Policy Modification"
+      tactic: Defense Evasion
+    extra:
+      gpo_name: "AVH-Workstation-Baseline"
+      modification: "immediate scheduled task added"
+      task_command: "\\\\FS-CORE-02\\NETLOGON$\\svcupd.exe"
+
+  - id: encryption-begins
+    at: "+8d8h26m"
+    event_type: ransomware_encryption
+    log_sources: [windows]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      Encryption begins on the file server. Absent from CrowdStrike because
+      the sensor was removed 74 minutes earlier — the single clearest
+      demonstration in this catalog of why an EDR gap matters. Reconstructing
+      the encryption phase requires Windows events plus the firewall record
+      of SMB traffic to the affected shares.
+    mitre:
+      technique_id: T1486
+      technique_name: "Data Encrypted for Impact"
+      tactic: Impact
+    process:
+      pid: 8120
+      ppid: 1
+      name: svcupd.exe
+      command_line: '"C:\Windows\Temp\svcupd.exe" --threads 16 --net --no-local'
+      parent_name: taskeng.exe
+      sha256: "a1c93f2e5b6047d8130ae62c94f5b70d28e341ca9057bf16d3820e9c74a5f3b0"
+      integrity_level: System
+
+  - id: encryption-spread
+    at: "+8d8h31m"
+    event_type: ransomware_encryption
+    log_sources: [firewall_syslog]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      Mass SMB write traffic from the file server to workstation subnets as
+      encryption spreads. With EDR gone from this host, this firewall record
+      is one of the few remaining sources establishing scope and timing.
+    mitre:
+      technique_id: T1486
+      technique_name: "Data Encrypted for Impact"
+      tactic: Impact
+    network:
+      protocol: tcp
+      src_ip: 10.8.20.14
+      src_port: 445
+      dst_ip: 10.8.40.0
+      dst_port: 445
+      action: allow
+      app: "SMB"
+      rule_name: "allow-internal-smb"
+      bytes_sent: 18253611008
+      bytes_received: 402653184
+
+  - id: ransom-note
+    at: "+8d8h52m"
+    event_type: file_created
+    log_sources: [windows]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      Ransom notes written across the encrypted shares. The note references
+      stolen data and threatens publication, corroborating the exfiltration
+      seen roughly two hours earlier — but the CloudTrail-independent proof of
+      the breach is the firewall record, not the attacker's own claim.
+    mitre:
+      technique_id: T1486
+      technique_name: "Data Encrypted for Impact"
+      tactic: Impact
+    file:
+      path: \\FS-CORE-02\Patients\_READ_TO_RECOVER.txt
+      filename: _READ_TO_RECOVER.txt
+      sha256: "c4e1908b7a25df6304b1ce9827a4d05f63be8172a9d40c5e18f3b6027ce49a1d"
+      size_bytes: 2841
+
+  - id: workstation-encryption
+    at: "+8d8h38m"
+    event_type: ransomware_encryption
+    log_sources: [crowdstrike, windows]
+    severity: critical
+    actor: svc_imaging
+    host: jump
+    description: >
+      Encryption on the jump host, which still HAS its EDR sensor — only the
+      file server's was removed. This is the useful contrast: the same
+      encryptor, same hash, fully visible here and invisible on FS-CORE-02.
+      Comparing the two gives students a direct measure of exactly what the
+      tampering cost the investigation.
+    mitre:
+      technique_id: T1486
+      technique_name: "Data Encrypted for Impact"
+      tactic: Impact
+    process:
+      pid: 4488
+      ppid: 1
+      name: svcupd.exe
+      command_line: '"C:\Windows\Temp\svcupd.exe" --threads 16 --net --no-local'
+      parent_name: taskeng.exe
+      sha256: "a1c93f2e5b6047d8130ae62c94f5b70d28e341ca9057bf16d3820e9c74a5f3b0"
+      integrity_level: System
+
+  - id: dc-encryption
+    at: "+8d8h44m"
+    event_type: ransomware_encryption
+    log_sources: [windows, crowdstrike]
+    severity: critical
+    actor: svc_imaging
+    host: dc
+    description: >
+      The domain controller is encrypted, taking authentication with it.
+      This is why the outage is total rather than partial, and it
+      complicates recovery: the directory itself must be restored before
+      anything that depends on it can be.
+    mitre:
+      technique_id: T1486
+      technique_name: "Data Encrypted for Impact"
+      tactic: Impact
+    process:
+      pid: 3902
+      ppid: 1
+      name: svcupd.exe
+      command_line: '"C:\Windows\Temp\svcupd.exe" --threads 16 --net --no-local'
+      parent_name: taskeng.exe
+      sha256: "a1c93f2e5b6047d8130ae62c94f5b70d28e341ca9057bf16d3820e9c74a5f3b0"
+      integrity_level: System
+
+  - id: backup-appliance-wipe
+    at: "+8d8h47m"
+    event_type: file_deleted
+    log_sources: [firewall_syslog, windows]
+    severity: critical
+    actor: svc_imaging
+    host: fileserver
+    description: >
+      The backup catalog on the appliance is deleted — the payoff of the
+      reconnaissance two days earlier. Recovery now depends entirely on
+      whether offline or immutable copies exist outside this appliance, a
+      question the evidence here cannot answer and the report must raise.
+    mitre:
+      technique_id: T1490
+      technique_name: "Inhibit System Recovery"
+      tactic: Impact
+    network:
+      protocol: tcp
+      src_ip: 10.8.20.14
+      src_port: 50992
+      dst_ip: 10.8.30.9
+      dst_port: 445
+      action: allow
+      app: "SMB"
+      rule_name: "allow-internal-smb"
+      bytes_sent: 184320
+      bytes_received: 20480
+
+  - id: ir-declared
+    at: "+8d16h26m"
+    event_type: alert_triggered
+    log_sources: [windows]
+    severity: critical
+    host: fileserver
+    description: >
+      Incident response is declared at 06:40 when staff arrive. Nine days
+      and eight hours after initial access. Every stage before this was
+      logged somewhere and none of it generated an actionable alert — the
+      quiet reconnaissance, the single Kerberoast, the service account
+      behaving unlike a service account, the EDR going silent, the shadow
+      copy deletion, and 41 GB leaving the network.
+    mitre:
+      technique_id: T1486
+      technique_name: "Data Encrypted for Impact"
+      tactic: Impact
+
+answer_key:
+  - id: q1
+    question: "When did this intrusion actually begin, and how? State your confidence."
+    answer: >
+      Initial access was at 22:14 on 15 October — nine days and eight hours
+      before encryption — via a successful VPN authentication for the
+      contract radiologist rvasquez from 176.53.14.209, an address outside
+      her normal region, with no MFA challenge recorded. Her legitimate
+      session earlier that afternoon from 203.0.113.140 establishes the
+      baseline. HIGH confidence on the timing and the account.
+
+      HOW the credential was obtained cannot be determined. Mail gateway
+      logs were not retained and there is no telemetry from her personal
+      device. Phishing, infostealer malware, and purchase from a credential
+      broker are all consistent with the available evidence. This should be
+      reported as an open question, not resolved by assumption.
+    related_event_ids: [vpn-login-anomalous, benign-contractor-normal]
+    hint: "The visible incident is four hours long. The intrusion is not."
+    points: 5
+
+  - id: q2
+    question: "Was data stolen before encryption? This determines breach notification obligations — be precise."
+    answer: >
+      Yes. 41 GB was uploaded from FS-CORE-02 (10.8.20.14) to an external
+      cloud storage address at 04:54 on 24 October, roughly 100 minutes
+      BEFORE encryption began. The staging that produced it is visible 42
+      minutes earlier: rar.exe creating split, password-protected volumes
+      from the Patients and Finance shares. For a healthcare provider this
+      makes the incident a data breach in addition to a ransomware event,
+      with a materially different regulatory position. Note the ransom note
+      also claims data theft, but the firewall record is the proof — the
+      attacker's own claim is not evidence.
+    related_event_ids: [data-staging, exfil-to-cloud, ransom-note]
+    points: 5
+
+  - id: q3
+    question: "A large backup job read 380 GB from the same shares that night. Why is it not the exfiltration?"
+    answer: >
+      Three reasons, any one of which is sufficient. The executing account
+      is svc-avbackup (the legitimate backup identity), not the compromised
+      svc-imaging. The destination is the internal backup appliance
+      10.8.30.9, not an external address. And it runs on the same schedule
+      every night in the dataset, so it is not anomalous in timing. The real
+      staging occurs two hours later using rar.exe with split, encrypted
+      volumes written to a local temp directory — a completely different
+      tool, account, and destination.
+    related_event_ids: [decoy-backup-job, data-staging, exfil-to-cloud]
+    hint: "Compare the account, the tool, and the destination — not just the volume."
+    points: 5
+
+  - id: q4
+    question: "What happened to EDR coverage, and how does that change what you can conclude?"
+    answer: >
+      The CrowdStrike sensor on FS-CORE-02 was uninstalled at 05:26 via
+      msiexec, 74 minutes before encryption began. That uninstall is the
+      last EDR event for the host. Consequently the shadow copy deletion,
+      the encryption, and everything else on that server afterwards do NOT
+      appear in EDR and had to be reconstructed from Windows events and
+      firewall traffic. Any conclusion about FS-CORE-02 after 05:26 rests on
+      those two sources only. The gap has a precise start time because the
+      uninstall was recorded before the agent stopped — and a sensor going
+      silent while its peers keep reporting is itself a detectable condition
+      that should have alerted.
+    related_event_ids: [edr-tamper, shadow-copy-delete, encryption-begins]
+    points: 5
+
+  - id: q5
+    question: "How did the attacker get from one VPN account to domain-wide administrative access?"
+    answer: >
+      Three steps across six days. (1) Quiet AD enumeration from the jump
+      host on day one, specifically querying accounts with Service Principal
+      Names — reconnaissance for Kerberoasting. (2) A single Kerberos
+      service ticket request for svc-imaging using RC4 on day four; one
+      request rather than a burst, which is why no threshold rule fired. The
+      cracking happened offline and left no trace. (3) First use of the
+      cracked svc-imaging account on day seven, authenticating to the file
+      server — a host an imaging service account has no business reason to
+      touch and had never touched before.
+    related_event_ids: [ad-enumeration, kerberoast-request, svc-account-first-use, share-enumeration]
+    points: 4
+
+  - id: q6
+    question: "How was the encryptor distributed to 214 endpoints, and why does the mechanism matter?"
+    answer: >
+      Via Group Policy. The AVH-Workstation-Baseline GPO was modified on the
+      domain controller to add an immediate scheduled task executing
+      svcupd.exe from a network share. It matters because it explains the
+      speed and scale — one modification reaches every domain-joined machine
+      — and because it changes remediation: the GPO must be reverted and
+      audited before any system is restored, or recovered machines will
+      simply re-execute the task.
+    related_event_ids: [gpo-deployment, encryption-begins, encryption-spread]
+    points: 4
+
+  - id: q7
+    question: "Which events in this dataset are legitimate activity?"
+    answer: >
+      Three. Renata's genuine VPN session at 15:54 on 15 October from her
+      normal regional address; the monthly patch window on 19 October run by
+      svc-avbackup on the file server; and the nightly backup job at 02:00
+      on 24 October. All three occur inside the intrusion window and two of
+      them involve the very host and shares the attacker targeted, which is
+      what makes them worth ruling out explicitly rather than ignoring.
+    related_event_ids: [benign-contractor-normal, benign-patch-window, decoy-backup-job]
+    points: 4
+
+  - id: q8
+    question: "List what the evidence does NOT establish, and what you would request."
+    answer: >
+      Not established: the initial access vector for the VPN credential;
+      everything that occurred on FS-CORE-02 after the EDR uninstall at
+      05:26 beyond what Windows and firewall logs show; whether persistence
+      exists elsewhere in the estate; whether other accounts were
+      compromised during the six-day gap between Kerberoasting and the
+      service account's first use; and the exact contents of the exfiltrated
+      archive, which was password-protected.
+
+      Request: mail gateway logs for 8-15 October if any retention exists,
+      full disk images of FS-CORE-02 and AVH-JUMP-03, VPN concentrator logs
+      predating 15 October, EDR telemetry from all other hosts for the full
+      window, netflow to corroborate the 41 GB transfer independently, and
+      a domain-wide audit for additional GPO modifications and new accounts.
+    related_event_ids: [vpn-login-anomalous, edr-tamper, kerberoast-request, exfil-to-cloud]
+    hint: "Regulators and insurers will read this. Overstating is worse than incomplete."
+    points: 5
