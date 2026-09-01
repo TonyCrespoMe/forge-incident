@@ -306,7 +306,7 @@ category + difficulty ──► llm.generate_new_scenario() ───┤   (LLM 
    │          │cloudtr.│ activity│      │            │ _eml  │         │  (HEC) │  (ECS)  │  (KQL)   │
    ├──────────┼────────┼─────────┼──────┼────────────┴───────┤         └────────┴─────────┴──────────┘
    │ palo_alto│firewall│  linux  │windows│ outlook_msg_trace │                       │
-   │          │_syslog │         │       │                   │                       ▼
+   │          │_syslog │         │       │      + iis        │                       ▼
    ├──────────┴────────┴─────────┴───────┴───────────────────┤            loose files for SIEM ingest
    │  + any plugin emitters (registry.py discovery)          │
    └────────────────────────────┬────────────────────────────┘
@@ -388,7 +388,7 @@ Rules worth knowing:
 
 - **`at:` offsets, not absolute times.** `"+6m"`, `"+1h30m"`, `"-10s"` are all valid (units `d`/`h`/`m`/`s`, combinable). You can also give a full ISO-8601 timestamp if you need to pin something exactly.
 - **Every `actor:`/`host:` on an event must be a key declared in `actors:`/`hosts:`.** The loader refuses to load the file otherwise, with a message naming the bad key.
-- **Only include the typed payload block(s) the event's `log_sources` need.** `email:` for `outlook_message_trace`/`email_eml`, `network:` for `palo_alto`, `process:`/`file:` for `windows`/`linux`, `cloud:` for `gcp_audit`. See `models.py` for every field each payload type accepts.
+- **Only include the typed payload block(s) the event's `log_sources` need.** `email:` for `outlook_message_trace`/`email_eml`, `network:` for `palo_alto`/`firewall_syslog`/`okta` (Okta reads `src_ip` off `network:`, falling back to `cloud.caller_ip` if that's absent), `process:`/`file:`/`service:` for `windows`/`linux`/`crowdstrike`, `cloud:` for `gcp_audit`/`aws_cloudtrail`/`azure_activity`, `http:` for `iis`. See `models.py` for every field each payload type accepts.
 - **`description` and `mitre` are instructor-only.** No emitter renders them into a log file — they only ever appear in `instructor/INSTRUCTOR_GUIDE.md` and `instructor/manifest.json`. Don't rely on them to explain anything to students; that's what `student_briefing` is for.
 - **`answer_key[].related_event_ids`** reference the `id:` values you gave timeline entries (or the auto-generated `<scenario_id>::0007` form if you didn't set one).
 - **Timestamp jitter.** By default each event's timestamp gets up to ±3 seconds of seeded jitter (`timestamp_jitter_seconds:` at the top level to change it) so logs don't look suspiciously round — this never reorders events relative to your `at:` offsets.

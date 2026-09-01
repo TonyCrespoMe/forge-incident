@@ -1,0 +1,596 @@
+# ForgeIncident scenario file
+# =============================================================================
+# INTERMEDIATE TIER (curriculum I3). The first scenario with no phishing
+# email, no malware, and almost no endpoint telemetry at all -- everything
+# a student gets is a cloud identity log and two mailboxes' worth of
+# correspondence. That absence is deliberate: most real business email
+# compromise investigations look exactly like this, and a catalog that only
+# ever hands students an EDR agent to lean on isn't preparing them for it.
+#
+# What it teaches that nothing else does:
+#   - Legacy authentication protocols (IMAP/POP/basic auth) as an MFA
+#     bypass distinct from "no MFA was configured" (see B1) -- MFA *was*
+#     enforced here, on the interactive sign-in path. It just doesn't
+#     apply to a protocol built before Conditional Access existed.
+#   - A hidden inbox rule that keeps everything internal (move + mark
+#     read) versus a rule that forwards externally (see B1) -- this one
+#     wouldn't trip an external-forwarding DLP control, and blends in
+#     under a deliberately blank name.
+#   - That SPF/DKIM/DMARC all legitimately PASS on the fraudulent message,
+#     because it really was sent from the real mailbox. Authentication
+#     passing is not the same question as "did the account holder send
+#     this," and client IP in the message trace is where that distinction
+#     actually lives.
+#   - Two inbox rules on one account, one benign and one not, and no
+#     alert telling you which is which.
+#   - A financially-driven incident with no ransom note and no malware:
+#     the entire "impact" is a wire transfer that already left the
+#     building by the time anyone notices.
+#
+# Difficulty controls applied here on purpose:
+#   - Five benign events, more than half the malicious count, because the
+#     central skill this scenario tests is telling two inbox rules and
+#     two IP addresses apart, not spotting an obviously critical event.
+#   - The compromise itself is quiet: a blocked attempt, a single failed
+#     guess, then a success. Nothing here is loud in isolation.
+#   - Only three log sources (azure_activity, outlook_message_trace,
+#     email_eml), and one of them -- azure_activity -- is genuinely new
+#     coverage for this catalog.
+# =============================================================================
+
+scenario_id: business-email-compromise-01
+title: "Business Email Compromise: A Hidden Rule and a Redirected Invoice"
+
+description: >
+  Ridgeline Freight & Logistics bills customers for freight and cold-chain
+  logistics services net-30. An Accounts Receivable specialist's mailbox is
+  compromised via a reused password from an unrelated third-party breach --
+  the same credential-reuse problem behind most account takeovers, and
+  distinct from this catalog's phishing scenarios, which is why it's here.
+
+  The attacker's first attempt, an ordinary interactive browser sign-in, is
+  blocked outright by Conditional Access requiring MFA. Rather than give up,
+  they switch to a legacy authentication protocol (IMAP), which predates
+  Conditional Access and is not subject to it. One failed guess, then a
+  successful sign-in, and MFA is never in the picture at all.
+
+  Nine minutes later the attacker creates a mailbox rule via the same
+  Exchange cmdlet (New-InboxRule) legitimate rules are made with. Unlike a
+  forwarding rule, it sends nothing externally: any message from Ridgeline's
+  customer Meridian Cold Storage mentioning "invoice" or "payment" is moved
+  straight to the RSS Feeds folder and marked read. The rule is named "."
+  A second, genuinely benign rule already exists on the account -- a
+  three-week-old filter that files newsletters into a folder -- and the
+  investigation has to tell the two apart without help from an alert.
+
+  Three weeks later, Meridian emails asking about an overdue invoice. The
+  rule catches it before the specialist ever sees it. The attacker, still
+  signed in through the same legacy session, replies from her real,
+  fully-authenticated mailbox: apologies for the delay, and a notice that
+  Ridgeline's remittance bank details have changed. SPF, DKIM and DMARC all
+  pass, because the message genuinely originated from her account -- only
+  the client IP in the message trace gives away that it wasn't her. The
+  attacker deletes the sent reply from her Sent Items to reduce the chance
+  she notices it later.
+
+  The fraud isn't discovered for another eighteen days, when Meridian
+  follows up asking why the invoice still shows unpaid -- they'd already
+  wired the (redirected) payment. No technical alert ever fired; the
+  identity log recorded every step correctly, but nothing about a
+  successful, MFA-less sign-in from a legacy protocol looked unusual enough
+  on its own to raise anything.
+
+student_briefing: >
+  Ridgeline Freight & Logistics has been contacted by one of its customers,
+  Meridian Cold Storage, disputing an unpaid invoice they say they already
+  paid -- to bank details they received in an email from your Accounts
+  Receivable specialist, Diane Okafor.
+
+  Diane says she never sent any email about changed bank details.
+
+  You have three sources: the Entra ID / Azure Activity Log for Diane's
+  account (sign-ins and mailbox rule changes), the Exchange Online message
+  trace, and copies of the relevant emails.
+
+  Determine whether Diane's account was actually compromised, how access
+  was obtained, what the attacker did with it, and how the fraudulent
+  message reached Meridian without Diane's knowledge. The account currently
+  has two active inbox rules; you'll need to determine which one, if
+  either, is related to this incident.
+
+difficulty: intermediate
+version: "1.0"
+seed: 20251103
+
+organization:
+  name: Ridgeline Freight & Logistics
+  domain: ridgelinefreight.example
+  industry: Freight & Cold-Chain Logistics
+  timezone: UTC
+  gcp_project_id: "e274a3f1-8b9c-4d2e-9a11-6f3c8e0d5b47"  # reused generically as the Azure subscription ID; see azure_activity emitter
+
+mitre_tactics:
+  - Initial Access
+  - Defense Evasion
+  - Collection
+  - Impact
+
+learning_objectives:
+  - Read an Entra ID / Azure Activity sign-in log and distinguish an interactive sign-in from a legacy-protocol one
+  - Recognize legacy authentication as an MFA-bypass path distinct from "MFA was never configured"
+  - Identify a hidden inbox rule as persistence and collection, and explain why it evades external-forwarding controls
+  - Correlate a fraudulent email's true origin via client IP even when SPF/DKIM/DMARC all legitimately pass
+  - Distinguish a malicious inbox rule from a pre-existing benign one using creation time, source IP, and naming
+  - Explain why business email compromise can go undetected far longer than a technical intrusion
+
+tags: [bec, business-email-compromise, azure-activity, entra-id, legacy-authentication, inbox-rule, invoice-fraud, financial-theft, credential-reuse, intermediate]
+
+start_time: "2025-11-03T08:00:00Z"
+
+actors:
+  victim:
+    username: dokafor
+    email: dokafor@ridgelinefreight.example
+    display_name: Diane Okafor
+    department: Finance
+    role_title: Accounts Receivable Specialist
+    employee_id: RFL-3391
+    is_compromised: true
+  attacker:
+    # Present for instructor context. Identity/audit logs record the
+    # account used, never the person behind it -- so, as in the bundled
+    # B1 scenario, this actor is deliberately never referenced by any
+    # event. The only handles on the attacker are the IP and user-agent
+    # string, both of which recur consistently across every touchpoint.
+    username: unknown
+    email: unknown@unattributed.example
+    display_name: Unattributed External Actor
+    is_compromised: true
+
+timeline:
+  # ---- Pre-existing, unrelated rule: the noise the real one hides among --
+  - id: benign-legacy-rule
+    at: "+0m"
+    event_type: email_forwarding_rule_created
+    log_sources: [azure_activity]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. A personal rule Diane set up herself three weeks before the
+      compromise, filing newsletter and digest email into a folder. Present
+      here because the account's rule audit returns every active rule, not
+      just the one that matters, and telling this one apart from the
+      malicious rule created later is one of the two central tasks in this
+      investigation.
+    cloud:
+      method_name: "New-InboxRule"
+      service_name: "Exchange"
+      resource_name: "/users/dokafor@ridgelinefreight.example/mailboxSettings/rules"
+      caller_ip: 198.51.100.140
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
+      status_code: "OK"
+    extra:
+      rule_name: "Move Newsletters"
+      rule_conditions: "subject contains 'newsletter' or 'digest'"
+      rule_action: "move to Newsletters folder"
+
+  # ---- Initial access: a blocked attempt, then a legacy-protocol pivot --
+  - id: attacker-interactive-blocked
+    at: "+21d"
+    event_type: account_login_failure
+    log_sources: [azure_activity]
+    severity: high
+    actor: victim
+    description: >
+      The attacker's first attempt is an ordinary interactive browser
+      sign-in with a valid, reused password (obtained from an unrelated
+      third-party breach, not from anything Ridgeline logged). Conditional
+      Access blocks it outright because MFA is required for interactive
+      sign-ins on this account and the attacker cannot satisfy it. This
+      event is the proof MFA was working correctly right up until the
+      attacker changed protocol.
+    mitre:
+      technique_id: T1078.004
+      technique_name: "Valid Accounts: Cloud Accounts"
+      tactic: Initial Access
+    cloud:
+      method_name: "Sign-in activity (interactive)"
+      service_name: "SignInLogs"
+      resource_name: "/users/dokafor@ridgelinefreight.example"
+      caller_ip: 192.0.2.66
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      status_code: "Failure (AADSTS53003: blocked by Conditional Access policy)"
+
+  - id: attacker-legacy-fail
+    at: "+21d4m"
+    event_type: account_login_failure
+    log_sources: [azure_activity]
+    severity: medium
+    actor: victim
+    description: >
+      A single failed sign-in over IMAP, a legacy authentication protocol
+      that predates Conditional Access and is not subject to it. Wrong
+      password on the first attempt -- a minor variant of the same reused
+      credential.
+    cloud:
+      method_name: "Sign-in activity (non-interactive; legacy authentication)"
+      service_name: "SignInLogs"
+      resource_name: "/users/dokafor@ridgelinefreight.example"
+      caller_ip: 192.0.2.66
+      user_agent: "BAV2ROPC"
+      status_code: "Failure (AADSTS50126: invalid username or password)"
+
+  - id: attacker-legacy-success
+    at: "+21d7m"
+    event_type: account_login_success
+    log_sources: [azure_activity]
+    severity: critical
+    actor: victim
+    description: >
+      THE COMPROMISE. A successful sign-in over the same legacy IMAP
+      protocol, three minutes after the failed attempt, from the same IP.
+      No MFA challenge appears anywhere in this or any later legacy-auth
+      event, because the protocol has no mechanism to issue one -- this
+      is the actual root cause, not "MFA wasn't configured."
+    mitre:
+      technique_id: T1078.004
+      technique_name: "Valid Accounts: Cloud Accounts"
+      tactic: Initial Access
+    cloud:
+      method_name: "Sign-in activity (non-interactive; legacy authentication)"
+      service_name: "SignInLogs"
+      resource_name: "/users/dokafor@ridgelinefreight.example"
+      caller_ip: 192.0.2.66
+      user_agent: "BAV2ROPC"
+      status_code: "Success"
+
+  # ---- Persistence and collection: the hidden rule -----------------------
+  - id: hidden-rule-created
+    at: "+21d16m"
+    event_type: email_forwarding_rule_created
+    log_sources: [azure_activity]
+    severity: critical
+    actor: victim
+    description: >
+      THE PERSISTENCE MECHANISM, and the one to compare against
+      benign-legacy-rule. Created with the same New-InboxRule cmdlet, nine
+      minutes after the compromising sign-in, from the attacker's IP. It
+      does not forward anything externally -- it moves any message from
+      Meridian Cold Storage's domain mentioning "invoice" or "payment"
+      straight to the RSS Feeds folder and marks it read, then stops
+      processing further rules. Two things make it hard to spot: it never
+      leaves the mailbox (so an external-forwarding DLP rule would never
+      fire on it), and it is named "." -- a single period, chosen to be
+      easy to overlook in a rules list.
+    mitre:
+      technique_id: T1564.008
+      technique_name: "Hide Artifacts: Email Hiding Rules"
+      tactic: Defense Evasion
+    cloud:
+      method_name: "New-InboxRule"
+      service_name: "Exchange"
+      resource_name: "/users/dokafor@ridgelinefreight.example/mailboxSettings/rules"
+      caller_ip: 192.0.2.66
+      user_agent: "BAV2ROPC"
+      status_code: "OK"
+    extra:
+      rule_name: "."
+      rule_conditions: "from contains 'meridiancoldstorage.example' AND (subject contains 'invoice' OR subject contains 'payment')"
+      rule_action: "move to RSS Feeds folder; mark as read; stop processing more rules"
+
+  # ---- Benign daily activity, same general window -----------------------
+  - id: benign-normal-signin-1
+    at: "+22d1h"
+    event_type: account_login_success
+    log_sources: [azure_activity]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. Diane's ordinary interactive morning sign-in, MFA satisfied,
+      from her usual office IP. Baseline for what her legitimate access
+      pattern looks like -- flagging this counts as a false positive.
+    cloud:
+      method_name: "Sign-in activity (interactive)"
+      service_name: "SignInLogs"
+      resource_name: "/users/dokafor@ridgelinefreight.example"
+      caller_ip: 198.51.100.140
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
+      status_code: "Success"
+
+  # ---- The invoice thread and the fraud -----------------------------------
+  - id: customer-inquiry-inbound
+    at: "+42d2h"
+    event_type: email_sent
+    log_sources: [outlook_message_trace, email_eml]
+    severity: info
+    description: >
+      BENIGN, and the message the hidden rule was built to catch. Meridian
+      Cold Storage's accounts-payable contact emails Diane asking for the
+      status of Invoice RFL-2049, three weeks overdue. It matches the
+      hidden rule's conditions and is moved to RSS Feeds and marked read
+      the instant it arrives; Diane never sees it land.
+    email:
+      message_id: "<7d1e9c4a-3f82-4b16-9e0a-1c5f8a2d6e93@meridiancoldstorage.example>"
+      sender: pchandran@meridiancoldstorage.example
+      recipients: [dokafor@ridgelinefreight.example]
+      subject: "Following up - Invoice RFL-2049 payment status"
+      direction: inbound
+      spf: pass
+      dkim: pass
+      dmarc: pass
+      has_attachment: false
+      client_ip: 203.0.113.190
+      body_text: >
+        Hi Diane,
+
+        Just following up on Invoice RFL-2049 - it's showing as three
+        weeks past due on our end and I want to make sure it hasn't
+        fallen through the cracks. Can you confirm the current
+        remittance details on file so we can get this settled?
+
+        Thanks,
+        Priya Chandran
+        Accounts Payable, Meridian Cold Storage
+
+  - id: fraud-reply-outbound
+    at: "+42d2h9m"
+    event_type: email_sent
+    log_sources: [outlook_message_trace, email_eml]
+    severity: critical
+    actor: victim
+    description: >
+      THE FRAUD. Sent from Diane's real, fully-authenticated mailbox --
+      SPF, DKIM and DMARC all legitimately pass, because this genuinely
+      came from her account. The only thing that doesn't match her is the
+      client IP: 192.0.2.66, the same address as every legacy-auth
+      sign-in above, not her usual 198.51.100.140. The message apologizes
+      for the delay and provides "updated" remittance bank details that
+      belong to the attacker.
+    mitre:
+      technique_id: T1657
+      technique_name: "Financial Theft"
+      tactic: Impact
+    email:
+      message_id: "<2b6f0a1d-5c93-4e77-8a4f-9d1b3e6c0f28@ridgelinefreight.example>"
+      sender: dokafor@ridgelinefreight.example
+      recipients: [pchandran@meridiancoldstorage.example]
+      subject: "RE: Following up - Invoice RFL-2049 payment status"
+      direction: outbound
+      spf: pass
+      dkim: pass
+      dmarc: pass
+      has_attachment: false
+      client_ip: 192.0.2.66
+      body_text: >
+        Hi Priya,
+
+        Apologies for the delay - we've had some changes on our end.
+        Also wanted to flag that Ridgeline updated our remittance bank
+        details last month; please use the account below for this and
+        all future payments rather than what you have on file:
+
+        Account Name: Ridgeline Freight & Logistics Receivables
+        Routing: 041000001 (placeholder, non-routable)
+        Account: 000123456789 (placeholder, non-routable)
+
+        Let me know once it's sent through.
+
+        Diane
+
+  - id: hides-evidence
+    at: "+42d2h14m"
+    event_type: file_deleted
+    log_sources: [outlook_message_trace]
+    severity: high
+    actor: victim
+    description: >
+      The fraudulent reply is deleted from Diane's Sent Items a few
+      minutes after being sent, to reduce the chance she notices it
+      before the rule can be found. As in the bundled B1 scenario, the
+      message trace is server-side and retains the record independent of
+      what the mailbox itself shows.
+    mitre:
+      technique_id: T1070.008
+      technique_name: "Indicator Removal: Clear Mailbox Data"
+      tactic: Defense Evasion
+
+  # ---- Life goes on, mostly unremarkably ----------------------------------
+  - id: benign-normal-signin-2
+    at: "+43d"
+    event_type: account_login_success
+    log_sources: [azure_activity]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. Another ordinary morning sign-in from Diane's usual office
+      IP, unrelated to the incident.
+    cloud:
+      method_name: "Sign-in activity (interactive)"
+      service_name: "SignInLogs"
+      resource_name: "/users/dokafor@ridgelinefreight.example"
+      caller_ip: 198.51.100.140
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
+      status_code: "Success"
+
+  - id: benign-outbound-routine
+    at: "+43d15m"
+    event_type: email_sent
+    log_sources: [outlook_message_trace]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. Diane emails a different, unrelated customer about a
+      separate routine invoice. Ordinary business correspondence, sent
+      from her own IP with no anomalies.
+    email:
+      message_id: "<9a2c5e17-6b40-4d83-b1f9-3e7a0c5d8b41@ridgelinefreight.example>"
+      sender: dokafor@ridgelinefreight.example
+      recipients: [ap@harborviewcanning.example]
+      subject: "Invoice RFL-2103 attached"
+      direction: outbound
+      spf: pass
+      dkim: pass
+      dmarc: pass
+      has_attachment: false
+      client_ip: 198.51.100.140
+
+  - id: attacker-return-signin
+    at: "+50d"
+    event_type: account_login_success
+    log_sources: [azure_activity]
+    severity: high
+    actor: victim
+    description: >
+      The attacker signs back in over the same legacy protocol a week
+      later, presumably to check whether the rule is still catching mail
+      and to read whatever else it has collected. Same IP, same
+      user-agent string as every prior attacker touchpoint.
+    mitre:
+      technique_id: T1114
+      technique_name: "Email Collection"
+      tactic: Collection
+    cloud:
+      method_name: "Sign-in activity (non-interactive; legacy authentication)"
+      service_name: "SignInLogs"
+      resource_name: "/users/dokafor@ridgelinefreight.example"
+      caller_ip: 192.0.2.66
+      user_agent: "BAV2ROPC"
+      status_code: "Success"
+
+  # ---- Discovery -----------------------------------------------------------
+  - id: customer-followup-confused
+    at: "+60d3h"
+    event_type: email_sent
+    log_sources: [outlook_message_trace, email_eml]
+    severity: medium
+    description: >
+      THE DISCOVERY. Diane, unaware anything is wrong, emails Meridian
+      about the still-overdue Invoice RFL-2049. Meridian replies that
+      they paid it eighteen days ago -- to the "updated" bank details
+      Diane supposedly sent. Diane has no memory of sending any such
+      email. This is the message that starts the actual investigation.
+    email:
+      message_id: "<4f8b1d63-2e97-4a05-8c3f-7b9e5a1d0c62@meridiancoldstorage.example>"
+      sender: pchandran@meridiancoldstorage.example
+      recipients: [dokafor@ridgelinefreight.example]
+      subject: "RE: Following up - Invoice RFL-2049 payment status"
+      direction: inbound
+      spf: pass
+      dkim: pass
+      dmarc: pass
+      has_attachment: false
+      client_ip: 203.0.113.190
+      body_text: >
+        Hi Diane,
+
+        I'm confused - we paid this on the updated account details you
+        sent over on the 15th. Can you check with your bank? We have the
+        wire confirmation on our end if that helps.
+
+        Priya
+
+  - id: alert-triggered
+    at: "+60d4h"
+    event_type: alert_triggered
+    log_sources: [azure_activity]
+    severity: critical
+    actor: victim
+    description: >
+      IT security is looped in and pulls Diane's sign-in and mailbox-audit
+      history. Sixty days after initial access: the legacy-auth sign-ins,
+      the "." rule, and the deleted Sent Items entry are all still there
+      and all consistent with each other. Nothing about any individual
+      event in this timeline was loud enough on its own to trigger
+      automated detection; the account's audit trail correctly recorded
+      every step, and nobody looked until the money was already gone.
+    mitre:
+      technique_id: T1657
+      technique_name: "Financial Theft"
+      tactic: Impact
+
+answer_key:
+  - id: q1
+    question: "How did the attacker get into Diane's mailbox, and why didn't MFA stop them?"
+    answer: >
+      A reused password from an unrelated breach got them a valid
+      credential, but their first sign-in attempt was an ordinary
+      interactive browser login, which Conditional Access blocked because
+      MFA is required on that path. They then authenticated over IMAP, a
+      legacy protocol that predates Conditional Access and cannot be
+      required to satisfy MFA. The legacy sign-in succeeded with the same
+      password and no MFA challenge at all. MFA was correctly configured;
+      it simply doesn't cover every protocol.
+    related_event_ids: [attacker-interactive-blocked, attacker-legacy-fail, attacker-legacy-success]
+    points: 4
+
+  - id: q2
+    question: "What did the attacker do right after signing in, and why is it more dangerous than an external-forwarding rule?"
+    answer: >
+      Nine minutes after the compromising sign-in, they created a mailbox
+      rule (New-InboxRule) named "." that moves any message from Meridian
+      Cold Storage mentioning "invoice" or "payment" to the RSS Feeds
+      folder and marks it read. Because it never sends anything outside
+      the mailbox, an external-forwarding DLP control -- the kind that
+      would have caught the bundled B1 scenario's forwarding rule -- would
+      never fire on it. The blank name is chosen to be overlooked in a
+      rules list.
+    related_event_ids: [hidden-rule-created]
+    points: 4
+
+  - id: q3
+    question: "Walk through exactly how the fraudulent payment redirection happened."
+    answer: >
+      Meridian's routine payment-status email matched the hidden rule's
+      conditions and was silently moved before Diane saw it. The attacker,
+      still signed in through the legacy session, replied to Meridian
+      directly from Diane's real mailbox with an apology for the delay and
+      "updated" bank details that were actually the attacker's own
+      account. Because the message truly originated from Diane's account,
+      SPF, DKIM and DMARC all passed legitimately -- there was no
+      authentication failure to catch.
+    related_event_ids: [customer-inquiry-inbound, fraud-reply-outbound]
+    points: 4
+
+  - id: q4
+    question: "Diane insists she never sent that email. What evidence proves someone else did?"
+    answer: >
+      The message trace records a client IP of 192.0.2.66 for the
+      fraudulent reply. That's the same address behind every legacy-auth
+      sign-in in this timeline, and it does not match 198.51.100.140,
+      the IP behind every message Diane's own sign-ins and normal
+      correspondence actually originate from. Authentication passing
+      proves the account sent it; the client IP is what proves Diane
+      personally did not.
+    related_event_ids: [fraud-reply-outbound, attacker-legacy-success, benign-normal-signin-1]
+    hint: "Authentication results tell you the message is genuine. They don't tell you who was logged in when it was sent."
+    points: 4
+
+  - id: q5
+    question: "The account has two active inbox rules. How do you tell which one is the incident and which one is background noise?"
+    answer: >
+      benign-legacy-rule was created three weeks before any attacker
+      activity, from Diane's normal office IP, with a descriptive name
+      ('Move Newsletters') and an action that just files mail into a
+      folder. hidden-rule-created was created nine minutes after the
+      compromising sign-in, from the attacker's IP, named a single period,
+      and targets a specific customer and specific overdue-invoice
+      keywords rather than a general content category. Creation time,
+      source IP, and specificity of the match conditions are the three
+      signals that separate them -- no alert flags either one.
+    related_event_ids: [benign-legacy-rule, hidden-rule-created]
+    points: 3
+
+  - id: q6
+    question: "What let this run for sixty days before anyone noticed, and what single control would have prevented it outright?"
+    answer: >
+      Nothing about this incident was loud: the rule kept everything
+      internal so there was no external-forwarding alert, and a
+      successful legacy-auth sign-in doesn't trigger impossible-travel
+      style detections the way an interactive sign-in from a new location
+      might. Discovery only happened because Meridian's own accounts-
+      payable process caught the mismatch between "invoice still shows
+      unpaid" and "we already wired it." Disabling legacy authentication
+      protocols entirely (or requiring modern auth org-wide) would have
+      stopped the initial access before any of the rest of this happened.
+    related_event_ids: [attacker-legacy-success, customer-followup-confused, alert-triggered]
+    points: 3

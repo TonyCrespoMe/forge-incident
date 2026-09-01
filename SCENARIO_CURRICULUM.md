@@ -58,7 +58,7 @@ another. Every scenario here contains benign activity that must be ruled out.
 |---|---|---|---|---|
 | I1 | Phishing to data exfiltration | Cross-source correlation via a shared hash and IP | email_eml, outlook_message_trace, palo_alto, windows | ✅ |
 | I2 | Insider USB data theft | Malicious intent inside *authorized* access; benign-vs-malicious discrimination | windows | ✅ |
-| I3 | Business email compromise | Follow the money: a hidden inbox rule and a redirected invoice | outlook_message_trace, email_eml, azure_activity | ⬜ |
+| I3 | Business email compromise | Follow the money: a hidden inbox rule and a redirected invoice | outlook_message_trace, email_eml, azure_activity | ✅ |
 | I4 | SQL injection to database dump | Read web logs; spot the anomalous path, not the anomalous agent | iis, palo_alto | ⬜ |
 | I5 | Compromised cloud VM cryptomining | Cost/CPU anomaly as the initial signal; work backwards to weak SSH | aws_cloudtrail, linux | ⬜ |
 | I6 | Malicious OAuth consent grant | Access that survives a password reset; token vs. password | azure_activity, okta | ⬜ |
@@ -103,7 +103,7 @@ deliberate visibility gap and at least one misleading artifact.
 | A04 Cryptographic Failures | — | **gap** |
 | A05 Injection | I4 | ⬜ |
 | A06 Insecure Design | E5 | ⬜ |
-| A07 Authentication Failures | B1 ✅, B2, I6 | partial |
+| A07 Authentication Failures | B1 ✅, I3 ✅, B2, I6 | partial |
 | A08 Software/Data Integrity Failures | A5 | ⬜ |
 | A09 Logging & Alerting Failures | E1, E3 | ⬜ |
 | A10 Mishandling of Exceptional Conditions | — | **gap** |
@@ -122,7 +122,7 @@ for anyone who wants to attempt one.
 | linux | A1, A2, A5, B2, E3, I5 | well covered |
 | iis | A3, I4, E5 | added recently |
 | aws_cloudtrail | A2, A5, B3, I5, E4 | covered |
-| azure_activity | I3, I6, E2, E4 | **not yet used by any BUILT scenario** |
+| azure_activity | I3 ✅, I6, E2, E4 | covered |
 | gcp_audit | A1, E4 | covered |
 | okta | B1, B5, I6, E2 | covered |
 | crowdstrike | A6, E1 | covered |
@@ -131,10 +131,10 @@ for anyone who wants to attempt one.
 | outlook_message_trace | I1, B1, I3 | covered |
 | email_eml | I1, B1, I3 | covered |
 
-Eleven of the twelve built-in emitters are exercised by at least one BUILT
-scenario. The exception is `azure_activity`, which is implemented and tested
-but appears only in planned rows — I3 (business email compromise) and I6
-(malicious OAuth consent grant) are the next two scenarios and both use it.
+All twelve built-in emitters are now exercised by at least one BUILT
+scenario. `azure_activity` was the last gap — I3 (business email
+compromise) closed it. I6 (malicious OAuth consent grant), still planned,
+will be the second scenario to use it.
 
 ---
 
