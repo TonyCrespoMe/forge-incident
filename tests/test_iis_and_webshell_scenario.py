@@ -165,7 +165,7 @@ def test_get_borne_commands_are_base64_encoded_not_cleartext():
         for m in re.findall(r"cmd=([A-Za-z0-9+/=]+)", content)
     ]
     assert "whoami" in decoded
-    assert any("pd.exe" in d for d in decoded)
+    assert any("wmiutil.exe" in d for d in decoded)
     assert any("Invoke-SMBExec" in d for d in decoded)
 
 
@@ -187,8 +187,8 @@ def test_scenario_loads_and_covers_both_hosts():
     assert len(scenario.answer_key) >= 8
     paths = _artifacts(scenario)
     assert any("/iis/" in p for p in paths)
-    assert any("web01" in p for p in paths)
-    assert any("dcsrv" in p for p in paths)
+    assert any("appsrv-02" in p for p in paths)
+    assert any("dc-core-01" in p for p in paths)
 
 
 def test_the_post_visibility_gap_actually_holds():
@@ -197,7 +197,7 @@ def test_the_post_visibility_gap_actually_holds():
     scenario = load_scenario(SCENARIO_FILE)
     artifacts = _artifacts(scenario)
     iis = _iis_log(artifacts)
-    dc = next(c for p, c in artifacts.items() if "dcsrv" in p)
+    dc = next(c for p, c in artifacts.items() if "dc-core-01" in p)
 
     for event_id in ("dc-recon-whoami", "dc-recon-hostname"):
         event = next(e for e in scenario.timeline if e.event_id == event_id)
@@ -212,11 +212,11 @@ def test_exfiltration_is_a_retrieval_not_just_a_rename():
     that distinction is what answer_key q4 grades."""
     scenario = load_scenario(SCENARIO_FILE)
     iis = _iis_log(_artifacts(scenario))
-    exfil = next(x for x in iis.splitlines() if "/uploads/cool_pic.png" in x)
+    exfil = next(x for x in iis.splitlines() if "/portal/assets/banner-hero.jpg" in x)
     fields = exfil.split(" ")
     assert fields[3] == "GET"
     assert "200" in fields
-    assert "125871" in fields, "the long transfer time is part of the evidence"
+    assert "98432" in fields, "the long transfer time is part of the evidence"
 
 
 def test_dump_hash_is_identical_before_and_after_the_rename():
@@ -234,7 +234,7 @@ def test_dump_hash_is_identical_before_and_after_the_rename():
 
 def test_all_six_service_installs_render_as_7045():
     scenario = load_scenario(SCENARIO_FILE)
-    dc = next(c for p, c in _artifacts(scenario).items() if "dcsrv" in p)
+    dc = next(c for p, c in _artifacts(scenario).items() if "dc-core-01" in p)
     names = re.findall(r'<Data Name="ServiceName">([^<]+)</Data>', dc)
     assert len(names) == 6
     for name in names:
@@ -247,13 +247,13 @@ def test_pass_the_hash_lands_as_an_ntlm_logon_on_the_dc():
     event = next(e for e in scenario.timeline if e.event_id == "dc-ntlm-logon")
     assert event.extra["authentication_package"] == "NTLM"
     assert event.extra["logon_type"] == 3
-    assert event.host == "dcsrv"
+    assert event.host == "dccore01"
 
 
 def test_the_stolen_hash_is_identical_everywhere_it_appears():
     scenario = load_scenario(SCENARIO_FILE)
     blob = "\n".join(a.content for a in run_all(scenario, BUILTIN_EMITTERS))
-    assert blob.count("847bfb693121775ad21ba7e42d47fd07") >= 2
+    assert blob.count("3ba61d9c7f04e28a5c6d13804f9ae7b2") >= 2
 
 
 def test_no_scanner_user_agents_so_students_must_hunt_by_path():

@@ -392,7 +392,7 @@ class ServiceInstall(ForgeBaseModel):
     a scenario can teach that pattern rather than hand-waving it.
     """
 
-    service_name: str = Field(..., description="e.g. 'XFBRJVUPQBBNMSAPIGNN'")
+    service_name: str = Field(..., description="e.g. 'QMZVTKDHRWNPLBXGCJUE'")
     image_path: str = Field(..., description="ImagePath, e.g. '%COMSPEC% /C \"whoami\"'")
     service_type: str = "user mode service"
     start_type: str = "demand start"

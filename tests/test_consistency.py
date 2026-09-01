@@ -32,7 +32,7 @@ actors:
     display_name: Unknown
 hosts:
   web01:
-    hostname: WEB01
+    hostname: SRV-01
     ip_address: 10.0.0.5
     host_type: server
     os: linux
@@ -67,7 +67,7 @@ def test_bundled_scenarios_produce_no_unused_actor_or_host_warnings():
 def test_unused_host_triggers_a_warning():
     yaml_text = _BASE_YAML.replace(
         "hosts:\n  web01:",
-        "hosts:\n  web01:\n    hostname: WEB01\n    ip_address: 10.0.0.5\n  unused-host:",
+        "hosts:\n  web01:\n    hostname: SRV-01\n    ip_address: 10.0.0.5\n  unused-host:",
     ).format(
         timeline=(
             "  - id: e1\n"
