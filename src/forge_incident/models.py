@@ -160,6 +160,8 @@ class EventType(str, Enum):
     ACCOUNT_LOCKOUT = "account_lockout"
     MFA_CHALLENGE = "mfa_challenge"
     MFA_BYPASS = "mfa_bypass"
+    MFA_METHOD_REGISTERED = "mfa_method_registered"
+    SESSION_TOKEN_REPLAY = "session_token_replay"
     PASSWORD_RESET = "password_reset"
     USER_CREATED = "user_created"
     GROUP_MEMBERSHIP_CHANGED = "group_membership_changed"

@@ -170,6 +170,45 @@ listing them.
 
 ---
 
+## 7. Staying current
+
+**Rule.** The threat landscape moves faster than a hand-written catalog
+can track by accident. A scenario that was representative when it was
+written reads as dated eighteen months later — not because it becomes
+*wrong*, but because it stops being what a real investigation looks like
+first. "Always up to date" is not a property a training tool acquires
+once; it's a maintenance habit, and it needs a trigger or it quietly
+lapses like any other maintenance habit does.
+
+**Practice.** Once or twice a year — or whenever a scenario feels like it
+might have aged — check the catalog's initial-access and persistence
+techniques against that cycle's major reports (Verizon DBIR, Mandiant
+M-Trends, CrowdStrike Global Threat Report, Microsoft's threat-intel
+blog). Two questions per check: is anything in the catalog now a
+minority technique rather than a common one, and is anything *missing*
+that's become common enough to matter. `aitm_session_hijack.yaml` is the
+first scenario added this way rather than from the original curriculum
+plan — see `SCENARIO_CURRICULUM.md`'s A7 entry for the reports that
+prompted it and the reasoning for why it was a genuine gap rather than
+just a new coat of paint on an existing lesson.
+
+**Not testable** — like constraint 6, this is an editorial judgment, not
+something a unit test can check. What *is* enforceable going forward:
+give a scenario added this way a note in the curriculum explaining what
+prompted it, so five years from now someone can tell "written from the
+original plan" apart from "added because the field changed," and audit
+whether the reasoning still holds.
+
+**Anti-pattern to avoid.** This is not a license to chase every headline.
+A technique earns a scenario when multiple independent reports converge
+on it as a *trend*, not when one write-up describes an interesting
+one-off. The bar is the same as constraint 6's: it has to teach something
+the catalog doesn't already teach, threat-landscape relevance is a reason
+to prioritize which gap to fill next, not a reason to skip asking whether
+it's actually a gap.
+
+---
+
 ## Open design: randomized cast
 
 **Goal.** Let one hand-written scenario yield unlimited variants at the same

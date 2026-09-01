@@ -76,6 +76,20 @@ the compromise correctly.
 | A4 | Kerberoasting to lateral movement | Offline cracking leaves almost no trace; find the ticket request | windows | ⬜ |
 | A5 | Supply chain: poisoned CI pipeline | Trust boundary is the build, not the code | linux, aws_cloudtrail | ⬜ |
 | A6 | Living-off-the-land admin abuse | Every tool used is signed and legitimate; only the pattern is wrong | windows, crowdstrike | ⬜ |
+| A7 | AiTM phishing to session-token theft | MFA is satisfied correctly and the account is compromised anyway; no failed sign-in exists to find | okta, palo_alto | ✅ |
+
+A7 wasn't in the original plan above — it was added out of cycle after a
+2026 threat-landscape check (Verizon DBIR, Microsoft, PwC, Darktrace) flagged
+adversary-in-the-middle (AiTM) session-token theft as the most consequential
+phishing evolution of the last two years: it defeats push/OTP MFA without
+needing a password-only account or a misconfiguration. Every other
+identity scenario in this catalog (B1, I3) is found by spotting an
+authentication *anomaly* — a failed login, a legacy protocol, an unfamiliar
+sign-in. A7 has none of those; the proof is structural (a session ID
+recurring from a new IP with no fresh sign-in in between), which is a
+skill this catalog didn't test before. This is the kind of gap the
+staying-current review in `DESIGN_CONSTRAINTS.md` (§7) is meant to keep
+catching before it goes unnoticed for a year.
 
 ## Tier 4 — Expert
 
@@ -103,7 +117,7 @@ deliberate visibility gap and at least one misleading artifact.
 | A04 Cryptographic Failures | — | **gap** |
 | A05 Injection | I4 | ⬜ |
 | A06 Insecure Design | E5 | ⬜ |
-| A07 Authentication Failures | B1 ✅, I3 ✅, B2, I6 | partial |
+| A07 Authentication Failures | B1 ✅, I3 ✅, A7 ✅, B2, I6 | partial |
 | A08 Software/Data Integrity Failures | A5 | ⬜ |
 | A09 Logging & Alerting Failures | E1, E3 | ⬜ |
 | A10 Mishandling of Exceptional Conditions | — | **gap** |
@@ -124,7 +138,7 @@ for anyone who wants to attempt one.
 | aws_cloudtrail | A2, A5, B3, I5, E4 | covered |
 | azure_activity | I3 ✅, I6, E2, E4 | covered |
 | gcp_audit | A1, E4 | covered |
-| okta | B1, B5, I6, E2 | covered |
+| okta | B1, A7 ✅, B5, I6, E2 | covered |
 | crowdstrike | A6, E1 | covered |
 | firewall_syslog | E1 | covered |
 | palo_alto | I1, A2, B4, I4, E5 | well covered |

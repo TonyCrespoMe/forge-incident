@@ -1,0 +1,464 @@
+# ForgeIncident scenario file
+# =============================================================================
+# ADVANCED TIER. The first scenario in this catalog where MFA is enforced,
+# MFA is genuinely satisfied, and the account is compromised anyway.
+# Adversary-in-the-middle (AiTM) phishing is the single most consequential
+# evolution in this space over the last two years precisely because it
+# defeats every push/OTP-based MFA scheme without needing a bug or a
+# misconfiguration -- it just relays the real authentication live and
+# steals what comes out the other end.
+#
+# What it teaches that nothing else does:
+#   - There is no failed sign-in and no impossible-travel pair anywhere in
+#     this scenario. Every prior identity-based scenario in this catalog
+#     (B1, I3) hinges on spotting an authentication anomaly; this one has
+#     none, because the authentication was completely genuine.
+#   - A session identifier (`externalSessionId`) as the correlating
+#     artifact across log lines, rather than an IP, hash, or filename.
+#     The proof of theft is structural: the same session ID appears from
+#     three different IPs, with no fresh sign-in event between the second
+#     and third.
+#   - Two device/MFA-factor registration events, identical in event type,
+#     one benign and one malicious -- distinguishable only by the session
+#     each rode in on, not by anything about the registration itself.
+#   - No dramatic ending. Nothing is encrypted, nothing is wired out. The
+#     entire "impact" is quiet, durable persistence that a password reset
+#     would not remove -- arguably more dangerous than a loud scenario
+#     precisely because it gives IR no obvious finish line.
+#
+# Difficulty controls applied here on purpose:
+#   - Only two log sources (okta, palo_alto), but the Okta evidence must be
+#     read relationally -- across four separate log lines -- rather than
+#     any single line being independently damning.
+#   - Three of nine events are unambiguously benign, including the paired
+#     "legitimate device registration" that exists specifically to prevent
+#     students from treating "MFA factor added" as sufficient evidence on
+#     its own.
+# =============================================================================
+
+scenario_id: aitm-session-hijack-01
+title: "Adversary-in-the-Middle: A Stolen Session Survives Correct MFA"
+
+description: >
+  Solstice Underwriting Group's identity provider is Okta, with MFA
+  enforced organization-wide. A Senior Underwriter's account is
+  compromised anyway, through an adversary-in-the-middle (AiTM) phishing
+  kit: a QR code embedded in a fake "document requires your signature"
+  text message leads to a page that is a live, transparent proxy in front
+  of the real Okta sign-in flow. The victim enters his real password and
+  approves the real MFA push on his real phone -- everything about the
+  authentication is genuine, which is the entire point of this technique.
+  The only thing the proxy operator captures is the session token Okta
+  issues once that genuine authentication completes.
+
+  Thirty-eight minutes later, the attacker uses the stolen token -- not a
+  password, not a fresh MFA prompt, just the copied token -- to access the
+  victim's mailbox, from infrastructure entirely separate from the
+  phishing proxy. Both this and a second access eighteen minutes later, to
+  the claims management portal, carry the exact same internal session
+  identifier as the original sign-in. No account_login event of any kind
+  sits between them: the session moved, but nothing re-authenticated it.
+
+  Seven minutes after the second access, using that same still-valid
+  session, the attacker registers a second MFA device on the account.
+  Because the session already reads as authenticated to Okta, no fresh MFA
+  challenge is required to make this change -- it looks, to the platform,
+  like an ordinary account-settings update made by an already-logged-in
+  user. This is the actual persistence mechanism: it will outlive the
+  stolen token once that token eventually expires, and a password reset
+  alone does not touch it.
+
+  The account already has one legitimate device-registration event on
+  file, from five weeks earlier, when the victim upgraded phones. A naive
+  search for "device registered" turns up two matches and gives no way to
+  tell them apart without looking at which session each rode in on.
+
+  The intrusion produces no failed sign-in, no block-worthy impossible-
+  travel signal, and no data loss dramatic enough to trip a financial or
+  volume-based guardrail. It surfaces six days later only because the
+  victim happens to receive an Okta Verify push he did not request and has
+  the presence of mind to deny it instead of approving it out of habit.
+
+student_briefing: >
+  Solstice Underwriting Group's IT security team has been contacted by
+  Marcus Feldman, a Senior Underwriter, after he received and denied an
+  Okta Verify push notification he says he did not request.
+
+  You have the Okta System Log covering Marcus's account, and the
+  perimeter firewall log covering his workstation, for the relevant
+  period.
+
+  Determine whether Marcus's account has actually been compromised, and if
+  so: how access was obtained given that MFA is enforced organization-wide
+  and no failed sign-in appears anywhere in the log, what the attacker did
+  with that access, and whether the account currently holds any attacker-
+  controlled persistence that a password reset alone would not remove. The
+  account has more than one MFA device-registration event on file; you'll
+  need to determine whether either, both, or neither is related to this
+  incident.
+
+difficulty: advanced
+version: "1.0"
+seed: 20260112
+
+organization:
+  name: Solstice Underwriting Group
+  domain: solsticeunderwriting.example
+  industry: Insurance Underwriting
+  timezone: UTC
+
+mitre_tactics:
+  - Initial Access
+  - Credential Access
+  - Collection
+  - Persistence
+
+learning_objectives:
+  - Recognize adversary-in-the-middle (AiTM) phishing as an MFA bypass requiring no failed sign-in at all
+  - Use a session identifier to prove continuity, or theft, of a session across separate log entries
+  - Distinguish "unusual sign-in location" from "stolen session" by the presence or absence of a fresh authentication event
+  - Identify MFA-device registration as a persistence mechanism distinct from the initial-access technique that enabled it
+  - Distinguish a legitimate MFA-factor registration from a malicious one using session context, not the action itself
+  - Explain why phishing-resistant MFA and token-binding controls address AiTM in a way push-based MFA does not
+
+tags: [aitm, adversary-in-the-middle, session-hijacking, token-theft, okta, mfa-bypass, phishing, persistence, advanced]
+
+start_time: "2026-01-12T08:00:00Z"
+
+actors:
+  victim:
+    username: mfeldman
+    email: mfeldman@solsticeunderwriting.example
+    display_name: Marcus Feldman
+    department: Underwriting
+    role_title: Senior Underwriter
+    employee_id: SUG-1187
+    is_compromised: true
+  attacker:
+    # Present for instructor context. As in the bundled B1 and I3
+    # scenarios, identity logs record the session and the account, never
+    # the person -- so this actor is deliberately never referenced by any
+    # event. The only handles on the attacker are two IPs, neither of
+    # which is the phishing proxy's IP: the intrusion is proven from the
+    # session identifier, not from IP reputation.
+    username: unknown
+    email: unknown@unattributed.example
+    display_name: Unattributed External Actor
+    is_compromised: true
+
+hosts:
+  ws-feldman:
+    hostname: SUG-UND-118
+    ip_address: 10.40.2.118
+    host_type: workstation
+    os: windows
+    os_version: "Windows 11 Pro 24H2"
+    domain_joined: true
+
+timeline:
+  # ---- Pre-existing, unrelated device registration ------------------------
+  - id: benign-legit-device-registration
+    at: "+0m"
+    event_type: mfa_method_registered
+    log_sources: [okta]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. Marcus enrolls a new phone as his Okta Verify push device
+      after a routine personal upgrade, five weeks before the compromise.
+      Ordinary self-service enrollment from his own IP. Present here so
+      the account's device-registration history returns two matches, not
+      one -- telling this one apart from mfa-method-registered below,
+      without help from an alert, is one of the two central tasks in this
+      investigation.
+    network:
+      protocol: tcp
+      src_ip: 198.51.100.212
+      src_port: 50210
+      dst_ip: 203.0.113.250
+      dst_port: 443
+      action: allow
+    extra:
+      enrollment_method: "Okta Verify push"
+      device_name: "Marcus's iPhone"
+
+  # ---- Benign baseline, compromise-day morning -----------------------------
+  - id: benign-normal-signin-1
+    at: "+35d"
+    event_type: account_login_success
+    log_sources: [okta]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. Marcus's ordinary morning sign-in, MFA satisfied by a push
+      to his real phone, from his usual office IP. Baseline for what his
+      legitimate access looks like.
+    network:
+      protocol: tcp
+      src_ip: 198.51.100.212
+      src_port: 50388
+      dst_ip: 203.0.113.250
+      dst_port: 443
+      action: allow
+
+  # ---- The lure -------------------------------------------------------------
+  - id: phishing-lure-click
+    at: "+35d6m"
+    event_type: network_connection_allowed
+    log_sources: [palo_alto]
+    severity: medium
+    actor: victim
+    host: ws-feldman
+    description: >
+      Marcus scans a QR code in a text message disguised as a document-
+      signature request. His browser opens what renders as a normal Okta
+      sign-in page; it is actually served by an attacker-controlled
+      reverse proxy sitting transparently between his browser and the real
+      Okta tenant. On its own this is just an outbound HTTPS connection to
+      an unfamiliar domain -- nothing here says "phishing" yet.
+    mitre:
+      technique_id: T1566.002
+      technique_name: "Phishing: Spearphishing Link"
+      tactic: Initial Access
+    network:
+      protocol: tcp
+      src_ip: 10.40.2.118
+      src_port: 51422
+      dst_ip: 192.0.2.90
+      dst_port: 443
+      action: allow
+      app: ssl
+      bytes_sent: 3184
+      bytes_received: 51902
+
+  # ---- The compromise: a genuinely correct authentication -------------------
+  - id: aitm-relayed-auth
+    at: "+35d9m"
+    event_type: account_login_success
+    log_sources: [okta]
+    severity: high
+    actor: victim
+    description: >
+      THE COMPROMISE, and the only event in this scenario where the
+      attacker's infrastructure appears directly. The proxy relays
+      Marcus's real password and his real MFA approval live to Okta, so
+      this sign-in is completely genuine from Okta's point of view --
+      right password, right MFA factor, right user. The one anomaly is the
+      client IP: 192.0.2.90 belongs to the phishing proxy, not Marcus's
+      office network. Circumstantial on its own (he could plausibly be on
+      a VPN); it becomes definitive only in light of what follows.
+    mitre:
+      technique_id: T1557
+      technique_name: "Adversary-in-the-Middle"
+      tactic: Credential Access
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.90
+      src_port: 44310
+      dst_ip: 203.0.113.250
+      dst_port: 443
+      action: allow
+    extra:
+      session_id: "102u9F21kLQpZmR8x3Vt7c"
+      mfa_satisfied: true
+
+  # ---- Token replay: no re-authentication anywhere in between ---------------
+  - id: token-replay-recon
+    at: "+35d47m"
+    event_type: session_token_replay
+    log_sources: [okta]
+    severity: critical
+    actor: victim
+    description: >
+      THE PROOF. Thirty-eight minutes after the compromising sign-in, the
+      exact same externalSessionId (102u9F21kLQpZmR8x3Vt7c) accesses
+      Marcus's mailbox via SSO -- from 192.0.2.140, a third IP, distinct
+      from both his real office network and the phishing proxy. No
+      account_login event of any kind exists between aitm-relayed-auth and
+      this one. A session does not relocate to new infrastructure mid-life
+      without being copied; this is the structural proof of theft that the
+      IP anomaly alone could not provide.
+    mitre:
+      technique_id: T1539
+      technique_name: "Steal Web Session Cookie"
+      tactic: Credential Access
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.140
+      src_port: 39880
+      dst_ip: 203.0.113.250
+      dst_port: 443
+      action: allow
+    extra:
+      session_id: "102u9F21kLQpZmR8x3Vt7c"
+      okta_app: "Microsoft 365 Mail (SSO)"
+
+  - id: token-replay-recon-2
+    at: "+35d1h5m"
+    event_type: session_token_replay
+    log_sources: [okta]
+    severity: critical
+    actor: victim
+    description: >
+      The same stolen session reaches the claims management portal
+      eighteen minutes later and browses several open underwriting files
+      -- reconnaissance, not yet the end goal. Same session ID, same
+      attacker IP, still no intervening sign-in event.
+    mitre:
+      technique_id: T1213
+      technique_name: "Data from Information Repositories"
+      tactic: Collection
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.140
+      src_port: 39944
+      dst_ip: 203.0.113.250
+      dst_port: 443
+      action: allow
+    extra:
+      session_id: "102u9F21kLQpZmR8x3Vt7c"
+      okta_app: "Claims Management Portal"
+
+  # ---- Persistence: durable, and invisible to a password reset --------------
+  - id: mfa-method-registered
+    at: "+35d1h12m"
+    event_type: mfa_method_registered
+    log_sources: [okta]
+    severity: critical
+    actor: victim
+    description: >
+      THE PERSISTENCE MECHANISM, and the event to compare against
+      benign-legit-device-registration. Using the still-valid stolen
+      session -- already authenticated as far as Okta is concerned, so no
+      fresh MFA challenge is required to change account security settings
+      -- the attacker enrolls their own device as a second push factor.
+      Given a plausible, unremarkable name to blend into a device list a
+      helpdesk agent might scan quickly. This is what survives even after
+      the stolen token itself eventually expires, and a password reset by
+      itself does nothing to remove it.
+    mitre:
+      technique_id: T1098.005
+      technique_name: "Account Manipulation: Device Registration"
+      tactic: Persistence
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.140
+      src_port: 39990
+      dst_ip: 203.0.113.250
+      dst_port: 443
+      action: allow
+    extra:
+      session_id: "102u9F21kLQpZmR8x3Vt7c"
+      enrollment_method: "Okta Verify push"
+      device_name: "iPhone"
+
+  # ---- Life goes on for the real Marcus --------------------------------------
+  - id: benign-normal-signin-2
+    at: "+36d"
+    event_type: account_login_success
+    log_sources: [okta]
+    severity: info
+    actor: victim
+    description: >
+      BENIGN. Marcus's own ordinary sign-in the next morning, unaware
+      anything is wrong, from his usual office IP with his own session.
+    network:
+      protocol: tcp
+      src_ip: 198.51.100.212
+      src_port: 50777
+      dst_ip: 203.0.113.250
+      dst_port: 443
+      action: allow
+
+  # ---- Discovery --------------------------------------------------------------
+  - id: alert-triggered
+    at: "+41d"
+    event_type: alert_triggered
+    log_sources: [okta]
+    severity: critical
+    actor: victim
+    description: >
+      Six days later, Marcus receives an Okta Verify push he did not
+      request -- routed to every enrolled factor on the account, including
+      the attacker's, when a downstream application triggers a step-up
+      re-authentication. He denies it and reports it to IT rather than
+      approving it out of habit. Pulling the sign-in history turns up the
+      mismatched-session activity and the second registered device; both
+      have been sitting there, unflagged, the entire time. Nothing in this
+      timeline was individually loud enough to trigger automated
+      detection.
+    mitre:
+      technique_id: T1098.005
+      technique_name: "Account Manipulation: Device Registration"
+      tactic: Persistence
+
+answer_key:
+  - id: q1
+    question: "MFA was enforced and no sign-in in the log ever failed. How did the attacker get in?"
+    answer: >
+      Adversary-in-the-middle phishing. A reverse proxy stood transparently
+      between Marcus and the real Okta tenant; he entered his real
+      password and approved the real MFA push himself. The authentication
+      was completely genuine -- the proxy's only job was to capture the
+      session token Okta issued once it succeeded.
+    related_event_ids: [phishing-lure-click, aitm-relayed-auth]
+    points: 4
+
+  - id: q2
+    question: "What is the single piece of evidence that proves this session was stolen, rather than just an unusual-but-legitimate sign-in location?"
+    answer: >
+      token-replay-recon and token-replay-recon-2 carry the exact same
+      externalSessionId as aitm-relayed-auth, but originate from a third
+      IP distinct from both Marcus's real network and the phishing proxy
+      -- and no account_login event of any kind sits between them. A
+      session cannot relocate to new infrastructure mid-life on its own;
+      the only way that happens is if it was copied.
+    related_event_ids: [aitm-relayed-auth, token-replay-recon, token-replay-recon-2]
+    hint: "The IP on aitm-relayed-auth alone is only circumstantial. What would make it definitive?"
+    points: 5
+
+  - id: q3
+    question: "The account has two MFA device-registration events. How do you tell which one is malicious?"
+    answer: >
+      benign-legit-device-registration comes from Marcus's own IP, five
+      weeks before any attacker activity, with no stolen session behind
+      it. mfa-method-registered carries the exact stolen session ID from
+      the token-replay events and originates from the attacker's IP. The
+      registration action itself looks identical in both cases; only the
+      session context distinguishes them.
+    related_event_ids: [benign-legit-device-registration, mfa-method-registered]
+    points: 4
+
+  - id: q4
+    question: "What did the attacker do with the stolen session before establishing persistence?"
+    answer: >
+      Accessed Marcus's mailbox via SSO, then browsed the claims
+      management portal for open underwriting files -- reconnaissance
+      ahead of the persistence step, not the end goal by itself.
+    related_event_ids: [token-replay-recon, token-replay-recon-2]
+    points: 3
+
+  - id: q5
+    question: "Why is the new MFA device more dangerous than the stolen session token alone?"
+    answer: >
+      A session token eventually expires. A self-registered MFA factor is
+      a durable credential the attacker controls indefinitely, and to
+      Okta it is indistinguishable from any other legitimate factor on the
+      account -- a password reset does not touch it, only removing the
+      specific factor does.
+    related_event_ids: [mfa-method-registered]
+    points: 3
+
+  - id: q6
+    question: "What controls would have prevented this incident, or shortened how long it ran undetected?"
+    answer: >
+      Phishing-resistant MFA (FIDO2/passkeys) cannot be relayed through an
+      AiTM proxy the way a push or OTP can, which would have stopped this
+      at the door. Token-binding / "token protection" conditional access
+      policies that tie a session to the device that created it would have
+      blocked every token-replay event outright. And an alert specifically
+      on new-MFA-factor registration -- a rare, high-value event regardless
+      of how the attacker got in -- would have caught the persistence step
+      the same hour it happened instead of six days later.
+    related_event_ids: [aitm-relayed-auth, mfa-method-registered, alert-triggered]
+    points: 3

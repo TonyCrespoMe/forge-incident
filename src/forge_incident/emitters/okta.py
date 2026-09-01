@@ -10,6 +10,16 @@ Correlation with the rest of a scenario is automatic and requires nothing
 extra from the scenario author. Like every other emitter, this one never
 invents an identifier that isn't already on the shared `Event`:
 
+- **`authenticationContext.externalSessionId`** defaults to a value derived
+  from the event's own `event_id` (so every event gets its own, as real
+  distinct sign-ins would). A scenario author can override this via
+  `Event.extra["session_id"]` to make two or more events share the SAME
+  session ID on purpose — this is how a session/token-theft scenario proves
+  its central claim: that later, malicious activity used the *same*
+  session a legitimate sign-in created, from a different IP, with no new
+  authentication event in between. See the bundled
+  `aitm_session_hijack.yaml` for the reference example.
+
 - The **user** comes from `Event.actor` — the same `Identity` the Windows,
   Linux, and cloud emitters resolve, so the username/email in an Okta
   record is identical to the one in every other log the actor appears in.
@@ -53,6 +63,14 @@ _EVENT_TYPE_MAP: dict[EventType, tuple[str, str]] = {
     EventType.MFA_BYPASS: (
         "user.mfa.attempt_bypass",
         "User attempted to bypass MFA",
+    ),
+    EventType.MFA_METHOD_REGISTERED: (
+        "user.mfa.factor.activate",
+        "Activate MFA factor for user",
+    ),
+    EventType.SESSION_TOKEN_REPLAY: (
+        "user.authentication.sso",
+        "SSO access via existing session",
     ),
     EventType.PASSWORD_RESET: ("user.account.update_password", "User update password"),
     EventType.USER_CREATED: ("user.lifecycle.create", "Create Okta user"),
@@ -158,8 +176,9 @@ class OktaEmitter(Emitter):
                 },
                 "authenticationContext": {
                     "authenticationStep": 0,
-                    "externalSessionId": stable_hex_id(
-                        event.event_id, "okta", "session", length=25
+                    "externalSessionId": event.extra.get(
+                        "session_id",
+                        stable_hex_id(event.event_id, "okta", "session", length=25),
                     ),
                 },
                 "securityContext": {
