@@ -1,0 +1,367 @@
+# ForgeIncident scenario file
+# =============================================================================
+# BEGINNER TIER (curriculum B3). A second, deliberately different entry
+# point for a newcomer alongside B1: where B1 is four log sources telling
+# one story from three angles, this one is a single log format (aws_
+# cloudtrail) read start to finish, and the "attack" is nine minutes of
+# a legitimate employee's own honest mistake.
+#
+# What it teaches that nothing else does:
+#   - Every previous bundled scenario's root cause is an attacker action.
+#     This one's root cause is Tom's own bucket policy change -- entirely
+#     well-intentioned, entirely his own account, no phishing, no stolen
+#     credential, no brute force. The report has to say so plainly, and
+#     must not describe Tom as an attacker or a compromised account.
+#   - The central judgment call the title names: "exposed" and "breached"
+#     are different findings. A bucket being publicly listable is a
+#     misconfiguration regardless of what happens next. Whether it is
+#     ALSO a breach depends entirely on whether the objects inside were
+#     actually retrieved by someone with no business doing so -- which
+#     this scenario answers cleanly (yes), but the distinction itself is
+#     the point, not the answer.
+#   - Scoping "what was taken" by checking every anonymous GetObject
+#     call, not stopping at the first one -- a light first pass at a
+#     skill I4 tests much harder later in the catalog.
+# =============================================================================
+
+scenario_id: s3-bucket-exposure-01
+title: "Misconfigured to Breached: An HR Bucket Made Public"
+
+description: >
+  Bramwell HR Solutions stores payroll and HR export files in an S3
+  bucket, bramwellhr-hr-exports. Tom Garcia, a platform engineer, needs
+  to share one quarterly report with an external auditor and updates the
+  bucket's policy to grant public read access -- intending to share a
+  single object's link, but scoping the policy to the entire bucket by
+  mistake. The change is entirely his own, made with his own credentials,
+  and is not itself an attack.
+
+  Eleven minutes later, an anonymous, unauthenticated caller lists the
+  bucket's full contents and, over the next few minutes, downloads two
+  files well beyond the one Tom meant to share: an employee SSN export
+  and a payroll bank-details export. Nothing about the caller's identity
+  is recoverable from the audit log -- S3 does not attribute anonymous
+  access to any principal -- but the objects retrieved are exactly the
+  bucket's most sensitive contents, not a random sample.
+
+  The exposure runs for four days before an external security researcher,
+  running routine internet-wide scans for publicly listable buckets,
+  finds it and files a responsible-disclosure report.
+
+student_briefing: >
+  Bramwell HR Solutions received a responsible-disclosure report from an
+  external security researcher stating that an S3 bucket,
+  bramwellhr-hr-exports, was publicly accessible for several days.
+
+  You have the AWS CloudTrail export for the bucket's account covering
+  the relevant period.
+
+  Determine what actually happened: how the bucket became public, whether
+  anyone actually accessed it beyond the researcher who reported it, and
+  if so, exactly what was taken. Your report needs to state clearly
+  whether this is a misconfiguration with no evidence of misuse, or an
+  actual breach requiring disclosure -- and if the latter, name precisely
+  which data was exposed.
+
+difficulty: beginner
+version: "1.0"
+seed: 20260118
+
+organization:
+  name: Bramwell HR Solutions
+  domain: bramwellhr.example
+  industry: HR & Payroll Software
+  timezone: UTC
+  gcp_project_id: "552341008877"  # reused generically as the AWS account ID; see aws_cloudtrail emitter
+
+mitre_tactics:
+  - Discovery
+  - Collection
+
+learning_objectives:
+  - Read a cloud audit log and distinguish an authenticated principal's actions from an anonymous one
+  - Recognize a bucket policy change as the root cause of an exposure, and understand it as a misconfiguration, not an attacker technique
+  - Distinguish "the bucket was publicly exposed" from "the bucket was actually accessed and data was taken"
+  - Scope a breach correctly by checking every anonymous access, not stopping at the first one found
+  - Explain why the person who made the misconfiguring change is not the attacker and should not be described as one
+
+tags: [aws, s3, misconfiguration, data-exposure, cloud-storage, owasp-a02, beginner]
+
+start_time: "2026-01-18T13:00:00Z"
+
+actors:
+  admin:
+    username: tgarcia
+    email: tgarcia@bramwellhr.example
+    display_name: Tom Garcia
+    department: Platform Engineering
+    role_title: DevOps Engineer
+    employee_id: BHR-2214
+  employee:
+    username: lchen
+    email: lchen@bramwellhr.example
+    display_name: Lena Chen
+    department: Human Resources
+    role_title: HR Operations Specialist
+    employee_id: BHR-3390
+
+timeline:
+  # ---- Benign baseline ------------------------------------------------
+  - id: benign-legit-list
+    at: "+0m"
+    event_type: cloud_api_call
+    log_sources: [aws_cloudtrail]
+    severity: info
+    actor: admin
+    description: >
+      BENIGN. Tom lists the bucket's contents as part of preparing the
+      quarterly report he intends to share with an external auditor.
+      Ordinary, authenticated administrative activity.
+    cloud:
+      method_name: "ListObjectsV2"
+      service_name: "s3.amazonaws.com"
+      resource_name: "arn:aws:s3:::bramwellhr-hr-exports"
+      caller_ip: 198.51.100.77
+      user_agent: "aws-cli/2.15.0"
+      status_code: "OK"
+      project_id: "552341008877"
+      region: "us-east-1"
+
+  # ---- The root cause: an honest, well-intentioned mistake ---------------
+  - id: misconfig-policy-change
+    at: "+6m"
+    event_type: cloud_permission_change
+    log_sources: [aws_cloudtrail]
+    severity: medium
+    actor: admin
+    description: >
+      THE ROOT CAUSE, and not an attacker action. Tom updates the
+      bucket's policy to grant public read access, intending to share the
+      link to a single quarterly report object with an external auditor.
+      The policy is scoped to the entire bucket rather than the one
+      object -- an honest mistake, made with his own legitimate
+      credentials. This event alone is a misconfiguration finding. It is
+      not yet a breach.
+    cloud:
+      method_name: "PutBucketPolicy"
+      service_name: "s3.amazonaws.com"
+      resource_name: "arn:aws:s3:::bramwellhr-hr-exports"
+      caller_ip: 198.51.100.77
+      user_agent: "aws-cli/2.15.0"
+      status_code: "OK"
+      project_id: "552341008877"
+      region: "us-east-1"
+    extra:
+      policy_change: "Principal: '*', Action: 's3:GetObject', 's3:ListBucket', Resource: entire bucket"
+
+  - id: benign-employee-download
+    at: "+22m"
+    event_type: cloud_api_call
+    log_sources: [aws_cloudtrail]
+    severity: info
+    actor: employee
+    description: >
+      BENIGN. Lena, in HR Operations, downloads a routine internal report
+      she has normal, authenticated access to. Unrelated to the policy
+      change and included so that not every GetObject call in this window
+      is treated as suspicious.
+    cloud:
+      method_name: "GetObject"
+      service_name: "s3.amazonaws.com"
+      resource_name: "arn:aws:s3:::bramwellhr-hr-exports/quarterly_headcount_report_2026Q1.pdf"
+      caller_ip: 198.51.100.90
+      user_agent: "aws-cli/2.15.0"
+      status_code: "OK"
+      project_id: "552341008877"
+      region: "us-east-1"
+
+  # ---- Exposure discovered and used, by someone unattributable ----------
+  - id: anonymous-list
+    at: "+3h41m"
+    event_type: cloud_api_call
+    log_sources: [aws_cloudtrail]
+    severity: high
+    description: >
+      An unauthenticated caller lists the bucket's full contents. S3 does
+      not attribute anonymous access to any IAM principal -- there is no
+      identity here to trace, which is why this scenario's actor field is
+      deliberately left unset on every anonymous-access event below.
+    mitre:
+      technique_id: T1619
+      technique_name: "Cloud Storage Object Discovery"
+      tactic: Discovery
+    cloud:
+      method_name: "ListObjectsV2"
+      service_name: "s3.amazonaws.com"
+      resource_name: "arn:aws:s3:::bramwellhr-hr-exports"
+      caller_ip: 192.0.2.140
+      user_agent: "python-requests/2.31.0"
+      status_code: "OK"
+      project_id: "552341008877"
+      region: "us-east-1"
+
+  - id: anonymous-get-1
+    at: "+3h44m"
+    event_type: data_exfiltration
+    log_sources: [aws_cloudtrail]
+    severity: critical
+    description: >
+      THE BREACH, PART ONE. The same anonymous caller downloads the
+      employee SSN export -- not the quarterly report Tom meant to share,
+      and not a random object from the bucket. Out of everything listed
+      a moment ago, this is one of the two most sensitive files present.
+    mitre:
+      technique_id: T1530
+      technique_name: "Data from Cloud Storage Object"
+      tactic: Collection
+    cloud:
+      method_name: "GetObject"
+      service_name: "s3.amazonaws.com"
+      resource_name: "arn:aws:s3:::bramwellhr-hr-exports/employee_ssn_export_2026Q1.csv"
+      caller_ip: 192.0.2.140
+      user_agent: "python-requests/2.31.0"
+      status_code: "OK"
+      project_id: "552341008877"
+      region: "us-east-1"
+    file:
+      path: "s3://bramwellhr-hr-exports/employee_ssn_export_2026Q1.csv"
+      filename: employee_ssn_export_2026Q1.csv
+      sha256: "a4c1e8f3b6d9027e5c8a1f4b7d0e3c6a9f2b5d8e1c4a7f0b3d6e9c2a5f8b1d40"
+      size_bytes: 118304
+
+  - id: anonymous-get-2
+    at: "+3h47m"
+    event_type: data_exfiltration
+    log_sources: [aws_cloudtrail]
+    severity: critical
+    description: >
+      THE BREACH, PART TWO -- and the reason scoping this incident means
+      checking every anonymous call, not stopping at the first. Three
+      minutes later the same caller downloads the payroll bank-details
+      export, the bucket's other most sensitive file. A report that
+      stops at anonymous-get-1 understates the breach by half.
+    mitre:
+      technique_id: T1530
+      technique_name: "Data from Cloud Storage Object"
+      tactic: Collection
+    cloud:
+      method_name: "GetObject"
+      service_name: "s3.amazonaws.com"
+      resource_name: "arn:aws:s3:::bramwellhr-hr-exports/payroll_bank_details_2026Q1.csv"
+      caller_ip: 192.0.2.140
+      user_agent: "python-requests/2.31.0"
+      status_code: "OK"
+      project_id: "552341008877"
+      region: "us-east-1"
+    file:
+      path: "s3://bramwellhr-hr-exports/payroll_bank_details_2026Q1.csv"
+      filename: payroll_bank_details_2026Q1.csv
+      sha256: "f7b2d5a8c1e4907f3b6d9c2a5e8f1b4d7a0c3e6f9b2d5a8c1e4f7b0d3a6c9e21"
+      size_bytes: 94716
+
+  # ---- Life continues, then discovery days later --------------------------
+  - id: benign-legit-list-2
+    at: "+1d"
+    event_type: cloud_api_call
+    log_sources: [aws_cloudtrail]
+    severity: info
+    actor: admin
+    description: >
+      BENIGN. Tom lists the bucket again the next day for unrelated
+      routine work, still unaware the policy change made it public.
+    cloud:
+      method_name: "ListObjectsV2"
+      service_name: "s3.amazonaws.com"
+      resource_name: "arn:aws:s3:::bramwellhr-hr-exports"
+      caller_ip: 198.51.100.77
+      user_agent: "aws-cli/2.15.0"
+      status_code: "OK"
+      project_id: "552341008877"
+      region: "us-east-1"
+
+  - id: alert-triggered
+    at: "+4d"
+    event_type: alert_triggered
+    log_sources: [aws_cloudtrail]
+    severity: critical
+    description: >
+      Four days after the policy change, an external security researcher
+      running routine internet-wide scans for publicly listable S3
+      buckets finds bramwellhr-hr-exports and files a responsible-
+      disclosure report. Nothing internal to Bramwell caught this --
+      there was no alert on the policy change itself, and no anomaly
+      detection scoped to anonymous S3 access.
+    mitre:
+      technique_id: T1530
+      technique_name: "Data from Cloud Storage Object"
+      tactic: Collection
+
+answer_key:
+  - id: q1
+    question: "How did the bucket become publicly accessible? Was this an attack?"
+    answer: >
+      No. Tom Garcia, a platform engineer, updated the bucket's policy to
+      grant public read access, intending to share one report with an
+      external auditor but scoping the change to the entire bucket by
+      mistake. It was made with his own legitimate credentials and no
+      malicious intent. It is a misconfiguration finding, and Tom should
+      not be described as an attacker or his account as compromised.
+    related_event_ids: [misconfig-policy-change]
+    points: 3
+
+  - id: q2
+    question: "Is 'the bucket was publicly exposed' the same finding as 'the bucket was breached'? Explain using this incident."
+    answer: >
+      No -- they are separate questions. Exposure is a state (anyone
+      could have accessed it); breach requires evidence someone actually
+      did, with no legitimate basis. Here, both are true: the bucket was
+      exposed for four days AND an anonymous caller actually listed and
+      downloaded sensitive files, which is what elevates this from a
+      configuration finding to a reportable breach.
+    related_event_ids: [misconfig-policy-change, anonymous-list, anonymous-get-1]
+    points: 3
+
+  - id: q3
+    question: "Exactly what data was taken, and why does it matter that you checked beyond the first download?"
+    answer: >
+      Two files: employee_ssn_export_2026Q1.csv and payroll_bank_
+      details_2026Q1.csv, three minutes apart, both by the same anonymous
+      caller. Stopping the investigation after the first download would
+      have understated the breach's scope by half and left the payroll
+      bank-details exposure completely undisclosed.
+    related_event_ids: [anonymous-get-1, anonymous-get-2]
+    points: 4
+
+  - id: q4
+    question: "Why can't the anonymous caller's identity be determined from the CloudTrail log?"
+    answer: >
+      Because the bucket policy granted access to Principal '*' --
+      anyone, with no authentication required. S3 has no IAM principal to
+      attribute anonymous, unauthenticated access to, so there is no
+      identity in the log to trace. This is a structural limit of the
+      evidence, not a gap in what was collected.
+    related_event_ids: [anonymous-list]
+    points: 2
+
+  - id: q5
+    question: "How was this incident actually discovered, and what does that say about Bramwell's own detection capability?"
+    answer: >
+      Not internally. An external security researcher running routine
+      scans for publicly listable buckets found it and filed a
+      responsible-disclosure report four days after the exposure began.
+      No internal alert fired on the policy change itself and no
+      detection was scoped to anonymous access against this bucket --
+      both would have caught this in minutes rather than days.
+    related_event_ids: [alert-triggered]
+    points: 3
+
+  - id: q6
+    question: "What single control would have prevented this incident regardless of the policy mistake Tom made?"
+    answer: >
+      S3 Block Public Access enabled at the account or bucket level would
+      have prevented the policy change from ever taking effect, making
+      the human error irrelevant to the outcome. This is the standard
+      recommended default specifically because policy mistakes like this
+      one are common and predictable.
+    related_event_ids: [misconfig-policy-change]
+    points: 2

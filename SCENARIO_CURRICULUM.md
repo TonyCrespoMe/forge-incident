@@ -45,7 +45,7 @@ timeline before forming a conclusion.
 |---|---|---|---|---|
 | B1 | Phishing to credential harvest | Read an identity log; recognize impossible-travel and a post-compromise inbox rule | okta, outlook_message_trace, email_eml, palo_alto | ✅ |
 | B2 | Brute force to successful login | Distinguish a failed-then-succeeded burst from noise; count attempts | linux | ⬜ |
-| B3 | Public S3 bucket exposure | Read cloud audit logs; distinguish "misconfigured" from "breached" | aws_cloudtrail | ⬜ |
+| B3 | Public S3 bucket exposure | Read cloud audit logs; distinguish "misconfigured" from "breached" | aws_cloudtrail | ✅ |
 | B4 | Malicious browser extension | Endpoint basics: process ancestry and a single outbound beacon | windows, palo_alto | ⬜ |
 | B5 | Shared account misuse | One credential, several people, one of them shouldn't be there | okta, windows | ⬜ |
 
@@ -112,7 +112,7 @@ deliberate visibility gap and at least one misleading artifact.
 | Category | Covered by | Status |
 |---|---|---|
 | A01 Broken Access Control | E5 | ⬜ |
-| A02 Security Misconfiguration | I5 ✅, B3 | partial |
+| A02 Security Misconfiguration | I5 ✅, B3 ✅ | done |
 | A03 Software Supply Chain Failures | A5 | ⬜ |
 | A04 Cryptographic Failures | — | **gap** |
 | A05 Injection | I4 ✅ | done |
@@ -135,7 +135,7 @@ for anyone who wants to attempt one.
 | windows | I1, I2, A3, A4, A6, E1, E2, E3, B4, B5 | well covered |
 | linux | A1, A2, I5 ✅, A5, B2, E3 | well covered |
 | iis | A3, I4 ✅, E5 | covered |
-| aws_cloudtrail | A2, I5 ✅, A5, B3, E4 | covered |
+| aws_cloudtrail | A2, I5 ✅, B3 ✅, A5, E4 | covered |
 | azure_activity | I3 ✅, I6, E2, E4 | covered |
 | gcp_audit | A1, E4 | covered |
 | okta | B1, A7 ✅, B5, I6, E2 | covered |

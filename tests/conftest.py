@@ -16,6 +16,7 @@ SCENARIOS_DIR = REPO_ROOT / "scenarios"
 
 BUNDLED_SCENARIO_FILENAMES = [
     "phishing_credential_harvest.yaml",
+    "s3_bucket_exposure.yaml",
     "phishing_to_exfil.yaml",
     "insider_usb_exfiltration.yaml",
     "business_email_compromise.yaml",
