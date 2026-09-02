@@ -143,7 +143,25 @@ def test_user_agent_spaces_are_escaped_as_plus_like_real_iis():
 def test_status_substatus_and_win32_status_are_separate_fields():
     line = next(x for x in _minimal_log().splitlines() if "/search.aspx" in x)
     fields = line.split(" ")
-    assert fields[-4:] == ["404", "2", "3", "88"]
+    # sc-bytes trails after time-taken (see test_sc_bytes_is_the_final_field
+    # below), so status/substatus/win32/time-taken are the second-to-last
+    # four fields, not the last four.
+    assert fields[-5:-1] == ["404", "2", "3", "88"]
+
+
+def test_sc_bytes_is_the_final_field_and_defaults_to_zero():
+    """sc-bytes (response size) is the loudest, least ambiguous anomaly
+    signal in scenarios like sql_injection_data_breach.yaml -- an endpoint
+    that normally returns a couple KB suddenly returning megabytes. If this
+    regressed silently, that scenario's central mechanic would stop
+    rendering into the actual log a student reads."""
+    content = _minimal_log()
+    header_fields = content.splitlines()[3].replace("#Fields: ", "").split()
+    assert header_fields[-1] == "sc-bytes"
+
+    line = next(x for x in content.splitlines() if "/search.aspx" in x)
+    fields = line.split(" ")
+    assert fields[-1] == "0", "unset bytes_sent must render as 0, not '-' or blank"
 
 
 def test_post_requests_never_leak_the_command_into_the_log():

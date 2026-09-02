@@ -59,7 +59,7 @@ another. Every scenario here contains benign activity that must be ruled out.
 | I1 | Phishing to data exfiltration | Cross-source correlation via a shared hash and IP | email_eml, outlook_message_trace, palo_alto, windows | ✅ |
 | I2 | Insider USB data theft | Malicious intent inside *authorized* access; benign-vs-malicious discrimination | windows | ✅ |
 | I3 | Business email compromise | Follow the money: a hidden inbox rule and a redirected invoice | outlook_message_trace, email_eml, azure_activity | ✅ |
-| I4 | SQL injection to database dump | Read web logs; spot the anomalous path, not the anomalous agent | iis, palo_alto | ⬜ |
+| I4 | SQL injection to database dump | Read web logs; spot anomalous query content on a mundane, low-attention endpoint | iis, palo_alto | ✅ |
 | I5 | Compromised cloud VM cryptomining | Cost/CPU anomaly as the initial signal; work backwards to weak SSH | aws_cloudtrail, linux | ⬜ |
 | I6 | Malicious OAuth consent grant | Access that survives a password reset; token vs. password | azure_activity, okta | ⬜ |
 
@@ -111,11 +111,11 @@ deliberate visibility gap and at least one misleading artifact.
 
 | Category | Covered by | Status |
 |---|---|---|
-| A01 Broken Access Control | I4, E5 | ⬜ |
+| A01 Broken Access Control | E5 | ⬜ |
 | A02 Security Misconfiguration | B3, I5 | ⬜ |
 | A03 Software Supply Chain Failures | A5 | ⬜ |
 | A04 Cryptographic Failures | — | **gap** |
-| A05 Injection | I4 | ⬜ |
+| A05 Injection | I4 ✅ | done |
 | A06 Insecure Design | E5 | ⬜ |
 | A07 Authentication Failures | B1 ✅, I3 ✅, A7 ✅, B2, I6 | partial |
 | A08 Software/Data Integrity Failures | A5 | ⬜ |
@@ -134,14 +134,14 @@ for anyone who wants to attempt one.
 |---|---|---|
 | windows | I1, I2, A3, A4, A6, E1, E2, E3, B4, B5 | well covered |
 | linux | A1, A2, A5, B2, E3, I5 | well covered |
-| iis | A3, I4, E5 | added recently |
+| iis | A3, I4 ✅, E5 | covered |
 | aws_cloudtrail | A2, A5, B3, I5, E4 | covered |
 | azure_activity | I3 ✅, I6, E2, E4 | covered |
 | gcp_audit | A1, E4 | covered |
 | okta | B1, A7 ✅, B5, I6, E2 | covered |
 | crowdstrike | A6, E1 | covered |
 | firewall_syslog | E1 | covered |
-| palo_alto | I1, A2, B4, I4, E5 | well covered |
+| palo_alto | I1, A2, B4, I4 ✅, A7 ✅, E5 | well covered |
 | outlook_message_trace | I1, B1, I3 | covered |
 | email_eml | I1, B1, I3 | covered |
 

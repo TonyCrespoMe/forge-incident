@@ -1,0 +1,562 @@
+# ForgeIncident scenario file
+# =============================================================================
+# INTERMEDIATE TIER (curriculum I4). The first scenario built around a web
+# application vulnerability (OWASP A05 Injection) rather than a stolen
+# credential or a phishing lure, and the first where the entire attack sits
+# in plaintext in the log the whole time -- there is nothing to decode.
+#
+# What it teaches that nothing else does:
+#   - Contrast with A3 (web-shell-to-DC): that scenario's device is an
+#     encoded, hidden command an analyst must decode. This one's device is
+#     the opposite -- everything is fully readable GET-parameter text, and
+#     the difficulty is entirely about actually reading it. A busy retail
+#     site's access log has thousands of lines; the injection is real,
+#     plain, and easy to miss anyway, because nothing about the REQUESTING
+#     party (IP, user-agent) looks unusual. Same "no scanner UAs" device as
+#     A3, applied to a different failure mode.
+#   - For SQL injection, data theft and data retrieval are the same event.
+#     Unlike A3 (dump on disk, THEN a separate download step to confirm
+#     exfiltration actually happened), there is no equivalent second step
+#     to look for here -- the instant a UNION SELECT against a sensitive
+#     table returns 200, the data already left. The answer key deliberately
+#     does not ask "was it exfiltrated," because the question doesn't apply.
+#   - A two-stage dump where the first table exposed (admin credentials) is
+#     bad but not the worst finding, and the second (stored payment card
+#     data) is dramatically worse. Built specifically so that stopping the
+#     investigation after the first successful dump understates the scope.
+#   - A vulnerability whose discovery reveals a SECOND, independent finding:
+#     the exposed schema stores raw CVV values at rest, which is its own
+#     PCI-DSS violation regardless of how the table was accessed.
+#
+# Difficulty controls applied here on purpose:
+#   - Every malicious request uses plain GET query parameters and an
+#     ordinary browser user-agent -- no base64, no obfuscation, no tool
+#     signature. The difficulty is entirely "did you read the query string."
+#   - Response size (bytes_sent) is the loudest, most consistent tell in
+#     this scenario and is realistic throughout: a single-record lookup
+#     endpoint that suddenly returns kilobytes, then megabytes, of data.
+#   - Benign customer traffic to the exact same endpoint, interleaved with
+#     the attack, so flagging every hit to /giftcard/balance.aspx is a
+#     false positive -- only specific query CONTENT is the signal.
+# =============================================================================
+
+scenario_id: sql-injection-data-breach-01
+title: "SQL Injection: From a Gift Card Lookup to a Payment Card Dump"
+
+description: >
+  Cascade Outdoor Supply's e-commerce site exposes a small, low-traffic
+  utility endpoint, /giftcard/balance.aspx, that checks a gift card code
+  against the database and returns its balance. The code parameter is
+  concatenated directly into a SQL query with no parameterization and no
+  input validation.
+
+  An external actor finds the endpoint, confirms it is injectable with a
+  single unescaped quote (a 500 error), and establishes a boolean-based
+  injection with code=' OR '1'='1 -- which returns every gift card in the
+  table instead of one. From there they enumerate the query's column count
+  with UNION SELECT probes (a 500 on a 1-column attempt, a 200 on 4
+  columns), then use that structure to pull two tables far outside the
+  endpoint's intended scope: first admin_users (usernames and password
+  hashes), then, an hour later, stored_payment_methods -- full card
+  numbers, CVV values, expiry dates, and cardholder names for every
+  transaction the site has ever processed.
+
+  Every request uses an ordinary browser user-agent and a plain GET query
+  string; nothing is encoded or obfuscated, and no scanning-tool signature
+  ever appears. The database account the web application authenticates
+  with has far more read access than a gift-card lookup should ever need,
+  which is what makes the second dump possible at all.
+
+  Separately from the injection itself: a table that stores CVV values at
+  rest is its own PCI-DSS violation, independent of how it was accessed.
+  The breach makes this finding visible; it did not create it.
+
+  The intrusion is not caught by anything at Cascade. It surfaces five
+  weeks later when the company's payment processor flags a common-point-
+  of-purchase fraud pattern tracing back to Cascade's storefront and
+  opens a forensic inquiry.
+
+student_briefing: >
+  Cascade Outdoor Supply's payment processor has flagged a common-point-
+  of-purchase fraud pattern: a cluster of cardholders who all made a
+  purchase on Cascade's site in the same window are now reporting
+  fraudulent charges elsewhere. The processor's notice names a five-week
+  window to investigate.
+
+  You have the IIS access log for Cascade's public web server and the
+  perimeter firewall log covering the same period.
+
+  Determine whether Cascade's site was actually compromised, and if so:
+  what the vulnerability was, exactly what data was accessed, and the full
+  scope of what needs to be disclosed. Be specific about which tables were
+  exposed and why — a report that stops at the first thing you find will
+  understate this breach.
+
+difficulty: intermediate
+version: "1.0"
+seed: 20260304
+
+organization:
+  name: Cascade Outdoor Supply
+  domain: cascadeoutdoor.example
+  industry: E-Commerce / Outdoor Retail
+  timezone: UTC
+
+mitre_tactics:
+  - Reconnaissance
+  - Initial Access
+  - Collection
+
+learning_objectives:
+  - Recognize SQL injection reconnaissance (quote-breaking, boolean tests, column enumeration) from plain IIS query-string content
+  - Distinguish a single anomalous request from a real injection chain using response size and timing, not status code alone
+  - Read UNION SELECT payloads to determine exactly which columns and tables were exposed
+  - Recognize that for SQL injection, data theft and data retrieval are the same event, with no separate exfiltration step to confirm
+  - Identify a compliance failure (stored CVV data) that exists independently of the vulnerability that exposed it
+  - Explain why the absence of a scanning-tool signature does not mean the absence of active exploitation
+
+tags: [sql-injection, sqli, iis, web-application, owasp-a05, data-breach, payment-card-data, pci-dss, intermediate]
+
+start_time: "2026-03-04T02:00:00Z"
+
+actors:
+  attacker:
+    # Never referenced by any event. An IIS log records a client IP, never
+    # an identity -- and this endpoint is unauthenticated, so there is no
+    # account to attribute the activity to even in principle. Present for
+    # instructor context only, matching the convention in every other
+    # web-log-driven scenario in this catalog.
+    username: unknown
+    email: unknown@unattributed.example
+    display_name: Unattributed External Actor
+    is_compromised: true
+
+hosts:
+  websrv:
+    hostname: CAS-WEB-01
+    ip_address: 10.60.4.20
+    host_type: server
+    os: windows
+    os_version: "Windows Server 2022 / IIS 10"
+    domain_joined: false
+
+timeline:
+  # ---- Benign customer traffic to the same endpoint ------------------------
+  - id: benign-lookup-1
+    at: "+0m"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: info
+    host: websrv
+    description: >
+      BENIGN. An ordinary customer checking their own gift card balance.
+      One record, small response. Baseline for what normal use of this
+      endpoint looks like.
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=7F3KQ92M"
+      status_code: 200
+      time_taken_ms: 22
+      bytes_sent: 2184
+      user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+    network:
+      protocol: tcp
+      src_ip: 203.0.113.14
+      src_port: 52110
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+
+  - id: benign-lookup-2
+    at: "+11m"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: info
+    host: websrv
+    description: >
+      BENIGN. A different customer, same endpoint, same shape of request
+      and response.
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=A1B2C3D4"
+      status_code: 200
+      time_taken_ms: 19
+      bytes_sent: 2091
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 198.51.100.63
+      src_port: 61402
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+
+  # ---- Reconnaissance: is this injectable? ---------------------------------
+  - id: probe-quote
+    at: "+2h14m"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: medium
+    host: websrv
+    description: >
+      A single unescaped quote in the code parameter breaks the underlying
+      SQL query and IIS returns a 500. On its own this proves nothing --
+      it could be a bug report -- but it is the standard first probe for
+      SQL injection, and the requesting IP and user-agent look completely
+      ordinary throughout everything that follows.
+    mitre:
+      technique_id: T1595.002
+      technique_name: "Active Scanning: Vulnerability Scanning"
+      tactic: Reconnaissance
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=TEST1234'"
+      status_code: 500
+      time_taken_ms: 31
+      bytes_sent: 3218
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.77
+      src_port: 44012
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+
+  - id: probe-boolean-true
+    at: "+2h17m"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: high
+    host: websrv
+    description: >
+      THE FIRST REAL TELL. code=' OR '1'='1 makes the WHERE clause always
+      true, so the query returns every row in the gift card table instead
+      of the one the endpoint was designed to return. bytes_sent jumps
+      from ~2KB (one record) to well over 100KB -- an endpoint that is
+      supposed to return a single balance should never have a response
+      this size, regardless of what status code comes back.
+    mitre:
+      technique_id: T1190
+      technique_name: "Exploit Public-Facing Application"
+      tactic: Initial Access
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=X' OR '1'='1"
+      status_code: 200
+      time_taken_ms: 340
+      bytes_sent: 187420
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.77
+      src_port: 44018
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+      bytes_sent: 187420
+
+  # ---- Column enumeration ----------------------------------------------------
+  - id: probe-union-col-mismatch
+    at: "+2h22m"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: high
+    host: websrv
+    description: >
+      A UNION SELECT with a single NULL column fails, because the
+      underlying query does not select exactly one column. The 500 itself
+      is diagnostic information: it tells the attacker the column count is
+      wrong, one attempt closer to finding the right one.
+    mitre:
+      technique_id: T1190
+      technique_name: "Exploit Public-Facing Application"
+      tactic: Initial Access
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=X' UNION SELECT NULL--"
+      status_code: 500
+      time_taken_ms: 28
+      bytes_sent: 3218
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.77
+      src_port: 44025
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+
+  - id: probe-union-col-confirmed
+    at: "+2h24m"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: high
+    host: websrv
+    description: >
+      Four NULL columns succeeds. The query underlying this endpoint
+      selects exactly four columns -- structural information the attacker
+      now has and the endpoint was never meant to reveal.
+    mitre:
+      technique_id: T1190
+      technique_name: "Exploit Public-Facing Application"
+      tactic: Initial Access
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=X' UNION SELECT NULL,NULL,NULL,NULL--"
+      status_code: 200
+      time_taken_ms: 44
+      bytes_sent: 2240
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.77
+      src_port: 44031
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+
+  # ---- Ordinary traffic continues in between --------------------------------
+  - id: benign-lookup-3
+    at: "+2h31m"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: info
+    host: websrv
+    description: >
+      BENIGN. A real customer's lookup, interleaved with the attack.
+      Included so flagging every request to this endpoint -- rather than
+      specific query content -- counts as a false positive.
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=99ZK71QW"
+      status_code: 200
+      time_taken_ms: 24
+      bytes_sent: 2158
+      user_agent: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 203.0.113.55
+      src_port: 39220
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+
+  # ---- First dump: bad, but not the worst finding ---------------------------
+  - id: dump-admin-credentials
+    at: "+2h40m"
+    event_type: data_staging
+    log_sources: [iis, palo_alto]
+    severity: critical
+    host: websrv
+    description: >
+      The attacker uses the confirmed 4-column structure to pull the
+      admin_users table: usernames and password hashes for every Cascade
+      staff account with access to the admin console. Serious on its own
+      -- and the finding a time-pressured review might stop at. It is not
+      the worst thing this vulnerability exposed.
+    mitre:
+      technique_id: T1213
+      technique_name: "Data from Information Repositories"
+      tactic: Collection
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=X' UNION SELECT username,password_hash,NULL,NULL FROM admin_users--"
+      status_code: 200
+      time_taken_ms: 118
+      bytes_sent: 9840
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.77
+      src_port: 44057
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+      bytes_sent: 9840
+
+  # ---- Second dump: the actual scope of the breach --------------------------
+  - id: dump-payment-cards
+    at: "+3h42m"
+    event_type: data_staging
+    log_sources: [iis, palo_alto]
+    severity: critical
+    host: websrv
+    description: >
+      THE ACTUAL SCOPE OF THIS BREACH. An hour after the first dump, the
+      same technique against a different table name -- stored_payment_
+      methods -- returns full card numbers, CVV values, expiry dates, and
+      cardholder names for every transaction the site has ever processed.
+      bytes_sent is over four megabytes, dwarfing every other request in
+      this log by a factor of hundreds. Separately from the injection
+      itself: a schema that stores CVV values at rest is its own PCI-DSS
+      violation, independent of how this table was reached.
+    mitre:
+      technique_id: T1213
+      technique_name: "Data from Information Repositories"
+      tactic: Collection
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=X' UNION SELECT card_number,cvv,expiry,cardholder_name FROM stored_payment_methods--"
+      status_code: 200
+      time_taken_ms: 6840
+      bytes_sent: 4180224
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    network:
+      protocol: tcp
+      src_ip: 192.0.2.77
+      src_port: 44090
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+      bytes_sent: 4180224
+
+  # ---- More ordinary traffic, then discovery weeks later ---------------------
+  - id: benign-lookup-4
+    at: "+1d"
+    event_type: web_request
+    log_sources: [iis, palo_alto]
+    severity: info
+    host: websrv
+    description: >
+      BENIGN. Business as usual the next day. Nothing about this endpoint
+      changed from a customer's point of view at any point in this
+      incident -- the vulnerability was never patched, and no alert ever
+      fired internally.
+    http:
+      method: GET
+      uri_stem: /giftcard/balance.aspx
+      uri_query: "code=QW12ER34"
+      status_code: 200
+      time_taken_ms: 20
+      bytes_sent: 2201
+      user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+    network:
+      protocol: tcp
+      src_ip: 203.0.113.14
+      src_port: 52288
+      dst_ip: 10.60.4.20
+      dst_port: 443
+      action: allow
+      app: ssl
+
+  - id: alert-triggered
+    at: "+35d"
+    event_type: alert_triggered
+    log_sources: [iis]
+    severity: critical
+    host: websrv
+    description: >
+      Discovery, five weeks later, and not from anything at Cascade.
+      Cascade's payment processor identifies a common-point-of-purchase
+      fraud pattern -- a cluster of cardholders who all transacted on
+      Cascade's site in the same window are now reporting fraudulent
+      charges elsewhere -- and opens a forensic inquiry. Nothing in this
+      timeline generated an internal alert on its own; the vulnerability
+      was live and unremediated for the entire five weeks.
+    mitre:
+      technique_id: T1213
+      technique_name: "Data from Information Repositories"
+      tactic: Collection
+
+answer_key:
+  - id: q1
+    question: "What's the first indication something is wrong with this endpoint, and why isn't a single 500 error enough on its own to prove SQL injection?"
+    answer: >
+      probe-quote: a single unescaped quote in the code parameter breaks
+      the query and produces a 500. Alone, that's consistent with an
+      ordinary bug report or a curious user -- it only becomes meaningful
+      in light of what immediately follows: a deliberate boolean-based
+      probe from the same IP three minutes later.
+    related_event_ids: [probe-quote, probe-boolean-true]
+    points: 3
+
+  - id: q2
+    question: "Walk through how the attacker determined the underlying query selects exactly four columns."
+    answer: >
+      A UNION SELECT with one NULL column failed (500) because the real
+      query doesn't select one column. A UNION SELECT with four NULLs
+      succeeded (200). Classic column-count enumeration: increase the
+      NULL count until the database stops complaining about a mismatch.
+    related_event_ids: [probe-union-col-mismatch, probe-union-col-confirmed]
+    points: 3
+
+  - id: q3
+    question: "What data was exposed in the first table dumped, and why might a review stop there when it shouldn't?"
+    answer: >
+      admin_users: usernames and password hashes for Cascade's own staff
+      accounts. It's a serious, credible finding on its own, and a
+      time-pressured investigation could reasonably treat it as "the
+      breach" and move to remediation -- but the same technique was used
+      again an hour later against a completely different, far more
+      sensitive table.
+    related_event_ids: [dump-admin-credentials]
+    points: 3
+
+  - id: q4
+    question: "What is the actual full scope of this breach, and why does the second dump matter more than the first?"
+    answer: >
+      stored_payment_methods: full card numbers, CVV values, expiry dates,
+      and cardholder names for every transaction the site has processed.
+      bytes_sent for that single request is over 4MB, versus under 10KB
+      for the admin_users dump and roughly 2KB for a normal lookup -- an
+      unmistakable volume signal once you know to look at response size.
+      This is payment card data at scale, not a handful of staff
+      passwords, and changes the incident from "reset some admin
+      passwords" to a full PCI-DSS breach disclosure.
+    related_event_ids: [dump-payment-cards]
+    hint: "Compare bytes_sent across every request in this timeline. What does the scale tell you?"
+    points: 5
+
+  - id: q5
+    question: "For a SQL injection breach like this one, why isn't 'was the data actually exfiltrated' a separate question the way it was for a web-shell/LSASS-dump scenario?"
+    answer: >
+      There's no intermediate artifact here -- no dump written to disk,
+      nothing to rename or retrieve later. The instant the UNION SELECT
+      against stored_payment_methods returns a 200, the data is already in
+      the HTTP response body headed to the attacker. Retrieval and theft
+      are the same event.
+    related_event_ids: [dump-payment-cards]
+    points: 3
+
+  - id: q6
+    question: "Separately from the injection vulnerability itself, what does the stored_payment_methods table's schema reveal?"
+    answer: >
+      It stores raw CVV values at rest. PCI-DSS explicitly prohibits
+      storing CVV/CVV2 data after transaction authorization, regardless of
+      encryption or access controls. That's an independent compliance
+      failure that existed before this breach and would need remediation
+      even if the injection flaw were the only thing fixed.
+    related_event_ids: [dump-payment-cards]
+    points: 3
+
+  - id: q7
+    question: "How was this breach actually discovered, and what does that say about Cascade's own detection capability?"
+    answer: >
+      Not by anything internal to Cascade. Cascade's payment processor
+      flagged a common-point-of-purchase fraud pattern five weeks later
+      and opened the inquiry that led here. Every request in this
+      timeline -- including a 4MB-plus response from a single-record
+      lookup endpoint -- went unnoticed for over a month, which is itself
+      a finding: response-size monitoring on public endpoints would have
+      caught this in hours, not weeks.
+    related_event_ids: [alert-triggered]
+    points: 3

@@ -21,6 +21,14 @@ behave like a *real* IIS log rather than a clean CSV:
    student has to prove it happened from the target host's telemetry.
    That visibility gap is a first-class teaching device, not a modeling
    shortcut (see `models.HttpRequest`).
+4. **`sc-bytes` (response size) is included.** Not part of the bare
+   minimum W3C set, but a very commonly enabled one — real security teams
+   lean on it constantly, because an endpoint's response size is often the
+   loudest, least ambiguous signal that something abnormal happened,
+   independent of status code. `HttpRequest.bytes_sent` renders here as
+   `0` when unset. See the bundled `sql_injection_data_breach.yaml`,
+   where a single-record lookup endpoint suddenly returning megabytes is
+   the scenario's central tell.
 
 Web-shell commands supplied as `http.cmd_plaintext` are **base64-encoded**
 into the query string here, matching how this class of shell is actually
@@ -41,7 +49,7 @@ __all__ = ["IisEmitter"]
 #: The default W3C extended field set for IIS 10, in order.
 _FIELDS = (
     "date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip "
-    "cs(User-Agent) cs(Referer) sc-status sc-substatus sc-win32-status time-taken"
+    "cs(User-Agent) cs(Referer) sc-status sc-substatus sc-win32-status time-taken sc-bytes"
 )
 
 _DEFAULT_UA = (
@@ -129,6 +137,7 @@ class IisEmitter(Emitter):
                         _iis_field(http.substatus),
                         _iis_field(http.win32_status),
                         _iis_field(http.time_taken_ms if http.time_taken_ms is not None else 0),
+                        _iis_field(http.bytes_sent if http.bytes_sent is not None else 0),
                     )
                 )
             )
