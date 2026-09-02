@@ -20,6 +20,7 @@ BUNDLED_SCENARIO_FILENAMES = [
     "insider_usb_exfiltration.yaml",
     "business_email_compromise.yaml",
     "sql_injection_data_breach.yaml",
+    "cryptomining_cloud_compromise.yaml",
     "gcp_key_compromise.yaml",
     "aitm_session_hijack.yaml",
     "stolen_dev_credentials_aws.yaml",

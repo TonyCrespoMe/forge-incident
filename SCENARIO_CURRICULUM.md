@@ -60,7 +60,7 @@ another. Every scenario here contains benign activity that must be ruled out.
 | I2 | Insider USB data theft | Malicious intent inside *authorized* access; benign-vs-malicious discrimination | windows | ✅ |
 | I3 | Business email compromise | Follow the money: a hidden inbox rule and a redirected invoice | outlook_message_trace, email_eml, azure_activity | ✅ |
 | I4 | SQL injection to database dump | Read web logs; spot anomalous query content on a mundane, low-attention endpoint | iis, palo_alto | ✅ |
-| I5 | Compromised cloud VM cryptomining | Cost/CPU anomaly as the initial signal; work backwards to weak SSH | aws_cloudtrail, linux | ⬜ |
+| I5 | Compromised cloud VM cryptomining | Instance-scoped stolen credentials never leave the box; the attacker's real IP never appears in cloud logs at all | aws_cloudtrail, linux | ✅ |
 | I6 | Malicious OAuth consent grant | Access that survives a password reset; token vs. password | azure_activity, okta | ⬜ |
 
 ## Tier 3 — Advanced
@@ -112,7 +112,7 @@ deliberate visibility gap and at least one misleading artifact.
 | Category | Covered by | Status |
 |---|---|---|
 | A01 Broken Access Control | E5 | ⬜ |
-| A02 Security Misconfiguration | B3, I5 | ⬜ |
+| A02 Security Misconfiguration | I5 ✅, B3 | partial |
 | A03 Software Supply Chain Failures | A5 | ⬜ |
 | A04 Cryptographic Failures | — | **gap** |
 | A05 Injection | I4 ✅ | done |
@@ -133,9 +133,9 @@ for anyone who wants to attempt one.
 | Emitter | Scenarios using it (built + planned) | Notes |
 |---|---|---|
 | windows | I1, I2, A3, A4, A6, E1, E2, E3, B4, B5 | well covered |
-| linux | A1, A2, A5, B2, E3, I5 | well covered |
+| linux | A1, A2, I5 ✅, A5, B2, E3 | well covered |
 | iis | A3, I4 ✅, E5 | covered |
-| aws_cloudtrail | A2, A5, B3, I5, E4 | covered |
+| aws_cloudtrail | A2, I5 ✅, A5, B3, E4 | covered |
 | azure_activity | I3 ✅, I6, E2, E4 | covered |
 | gcp_audit | A1, E4 | covered |
 | okta | B1, A7 ✅, B5, I6, E2 | covered |
