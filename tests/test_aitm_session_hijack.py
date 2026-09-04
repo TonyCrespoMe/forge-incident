@@ -145,7 +145,11 @@ def test_scenario_loads():
 def test_the_stolen_session_id_appears_from_more_than_one_ip():
     scenario = load_scenario(SCENARIO_FILE)
     records = _okta_records(scenario)
-    stolen = [r for r in records if r["authenticationContext"]["externalSessionId"] == _STOLEN_SESSION]
+    stolen = [
+        r
+        for r in records
+        if r["authenticationContext"]["externalSessionId"] == _STOLEN_SESSION
+    ]
     assert len(stolen) >= 3, "the stolen session should recur across multiple log lines"
     ips = {r["client"]["ipAddress"] for r in stolen}
     assert _PROXY_IP in ips

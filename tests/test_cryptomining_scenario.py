@@ -88,7 +88,9 @@ def test_ssh_attacker_ip_never_appears_in_cloudtrail():
 def test_malicious_runinstances_calls_originate_from_the_instances_own_ip():
     scenario = load_scenario(SCENARIO_FILE)
     records = _cloudtrail_records(_artifacts(scenario))
-    malicious = [r for r in records if r["userIdentity"]["userName"].startswith("lucid-worker-role")]
+    malicious = [
+        r for r in records if r["userIdentity"]["userName"].startswith("lucid-worker-role")
+    ]
     assert len(malicious) == 2
     assert all(r["sourceIPAddress"] == _INSTANCE_OWN_IP for r in malicious)
     assert all("g4dn" in r["requestParameters"]["resourceName"] for r in malicious)

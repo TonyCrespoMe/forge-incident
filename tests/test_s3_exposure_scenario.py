@@ -50,7 +50,11 @@ def test_authenticated_calls_show_a_real_principal():
 def test_both_sensitive_files_are_confirmed_taken_not_just_one():
     scenario = load_scenario(SCENARIO_FILE)
     records = _cloudtrail_records(scenario)
-    gets = [r for r in records if r["eventName"] == "GetObject" and r["sourceIPAddress"] == _ANONYMOUS_IP]
+    gets = [
+        r
+        for r in records
+        if r["eventName"] == "GetObject" and r["sourceIPAddress"] == _ANONYMOUS_IP
+    ]
     taken = {r["requestParameters"]["resourceName"] for r in gets}
     assert taken == {
         "arn:aws:s3:::bramwellhr-hr-exports/employee_ssn_export_2026Q1.csv",
